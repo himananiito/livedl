@@ -8,6 +8,7 @@ import (
 	"./twitcas"
 	"./niconico"
 	"./youtube"
+	"./zip2mp4"
 )
 
 func main() {
@@ -26,16 +27,19 @@ func main() {
 		youtube.Recoed(opt.YoutubeId)
 
 	case "NICOLIVE":
-		//if opt.ConfPass == "" {
-		//	fmt.Println("-conf-pass <password> required")
-		//	options.Help()
-		//	return
-		//}
 		if err := niconico.Record(opt); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
+
+	case "ZIP2MP4":
+		if err := zip2mp4.Convert(opt.ZipFile); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
 	}
+
 
 	return
 }

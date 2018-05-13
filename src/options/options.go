@@ -26,6 +26,7 @@ type Option struct {
 	YoutubeId string
 	ConfFile string
 	ConfPass string
+	ZipFile string
 }
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
@@ -47,6 +48,7 @@ COMMAND:
   -nico    ニコニコ生放送の録画
   -tcas    ツイキャスの録画
   -yt      YouTube Liveの録画
+  -z2m     録画済みのzipをmp4に変換する(-zip-to-mp4)
 
 オプション/option:
   -conf-pass <password> 設定ファイルのパスワード
@@ -144,6 +146,10 @@ func ParseArgs() (opt Option) {
 			opt.Command = "YOUTUBE"
 			return nil
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?(?:z|zip)-?(?:2|to)-?(?:m|mp4)\z`), func() error {
+			opt.Command = "ZIP2MP4"
+			return nil
+		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?hls-?only\z`), func() error {
 			opt.NicoHlsOnly = true
 			return nil
@@ -230,6 +236,16 @@ func ParseArgs() (opt Option) {
 			opt.NicoRtmpMaxConn = num
 			return
 		}},
+		Parser{regexp.MustCompile(`\A(?i).+\.zip\z`), func() (err error) {
+			switch opt.Command {
+			case "", "ZIP2MP4":
+				opt.Command = "ZIP2MP4"
+				opt.ZipFile = match[0]
+			default:
+				return fmt.Errorf("%s: Use -- option before \"%s\"", opt.Command, match[0])
+			}
+			return
+		}},
 	}
 
 	checkFILE := func(arg string) bool {
@@ -256,6 +272,11 @@ func ParseArgs() (opt Option) {
 		case "TWITCAS":
 			if ma := regexp.MustCompile(`(?:.*/)?([^/]+)\z`).FindStringSubmatch(arg); len(ma) > 0 {
 				opt.TcasId = ma[1]
+				return true
+			}
+		case "ZIP2MP4":
+			if ma := regexp.MustCompile(`(?i)\.zip`).FindStringSubmatch(arg); len(ma) > 0 {
+				opt.ZipFile = arg
 				return true
 			}
 		}
@@ -315,8 +336,12 @@ func ParseArgs() (opt Option) {
 		if opt.TcasId == "" {
 			Help()
 		}
+	case "ZIP2MP4":
+		if opt.ZipFile == "" {
+			Help()
+		}
 	default:
-		fmt.Printf("[FIXME] argcheck for %s\n", opt.Command)
+		fmt.Printf("[FIXME] options.go/argcheck for %s\n", opt.Command)
 		os.Exit(1)
 	}
 

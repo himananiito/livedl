@@ -206,6 +206,8 @@ func (yt *YtDash) OpenFile() (err error) {
 	signal.Notify(chSig, os.Interrupt)
 	go func() {
 		<-chSig
+		yt.mZip.Lock()
+		defer yt.mZip.Unlock()
 		if yt.zipWriter != nil {
 			yt.zipWriter.Close()
 		}
