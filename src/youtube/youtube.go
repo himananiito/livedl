@@ -171,6 +171,7 @@ func (yt *YtDash) Wait() {
 	case "youtube":
 		panic("Not implemented")
 		return
+
 	case "yt_live_broadcast":
 		yt.RecordForward()
 		<-yt.ChEnd
@@ -316,45 +317,7 @@ func (yt *YtDash) RecordBack() {
 	}
 }
 
-func MergeVideoAudio(vfile, afile string) (err error) {
-	cmd := exec.Command("./ffmpeg.exe")
-	cmd.Args = append(cmd.Args, "-i")
-	cmd.Args = append(cmd.Args, vfile)
-	cmd.Args = append(cmd.Args, "-i")
-	cmd.Args = append(cmd.Args, afile)
-	cmd.Args = append(cmd.Args, "-c")
-	cmd.Args = append(cmd.Args, "copy")
-	cmd.Args = append(cmd.Args, "-f")
-	cmd.Args = append(cmd.Args, "mpegts")
-	cmd.Args = append(cmd.Args, "-")
-
-	if _, err = cmd.StderrPipe(); err != nil {
-		return
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return
-	}
-
-	if err = cmd.Start(); err != nil {
-		return
-	}
-
-	go func() {
-		fmt.Printf("%v\n", stdout)
-		//wb, err := io.Copy(yt.TsFile, stdout)
-		//if err != nil {
-		//	fmt.Println(err)
-		//	return
-		//}
-		//fmt.Printf("wb is %#v\n", wb)
-	}()
-	err = cmd.Wait()
-
-	return
-}
-
-func Recoed(id string) (err error) {
+func Record(id string) (err error) {
 	uri := fmt.Sprintf("https://www.youtube.com/watch?v=%s", id)
 	req, _ := http.NewRequest("GET", uri, nil)
 

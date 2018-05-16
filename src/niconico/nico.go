@@ -42,11 +42,11 @@ func NicoLogin(id, pass string, opt options.Option) (err error) {
 		if err = cryptoconf.Set(data, opt.ConfFile, opt.ConfPass); err != nil {
 			return
 		}
+		fmt.Println("login success")
 	} else {
 		err = fmt.Errorf("login failed: session_key not found")
 		return
 	}
-	fmt.Println("login success")
 	return
 }
 

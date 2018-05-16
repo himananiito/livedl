@@ -24,7 +24,7 @@ func main() {
 		twitcas.TwitcasRecord(opt.TcasId, "")
 
 	case "YOUTUBE":
-		youtube.Recoed(opt.YoutubeId)
+		youtube.Record(opt.YoutubeId)
 
 	case "NICOLIVE":
 		if err := niconico.Record(opt); err != nil {

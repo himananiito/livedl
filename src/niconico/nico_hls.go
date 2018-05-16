@@ -646,34 +646,45 @@ func (hls *NicoHls) Wait() (shouldReconnect, done bool, err error) {
 }
 
 func getProps(opt options.Option) (props interface{}, notLogin bool, err error) {
-	url := fmt.Sprintf("http://live2.nicovideo.jp/watch/%s", opt.NicoLiveId)
-	req, _ := http.NewRequest("GET", url, nil)
-	if opt.NicoSession != "" {
-		req.Header.Set("Cookie", "user_session=" + opt.NicoSession)
+	formats := []string{
+		"http://live2.nicovideo.jp/watch/%s",
+		"http://live.nicovideo.jp/watch/%s",
 	}
 
-	client := new(http.Client)
-	resp, err := client.Do(req)
-	if err != nil {
-		//fmt.Println(err)
-		return
-	}
-	defer resp.Body.Close()
-	dat, _ := ioutil.ReadAll(resp.Body)
+	for _, format := range formats {
+		url := fmt.Sprintf(format, opt.NicoLiveId)
+		req, _ := http.NewRequest("GET", url, nil)
+		if opt.NicoSession != "" {
+			req.Header.Set("Cookie", "user_session=" + opt.NicoSession)
+		}
 
-	re := regexp.MustCompile(`data-props="(.*?)"`)
-	if ma := re.FindSubmatch(dat); len(ma) > 0 {
-		str := html.UnescapeString(string(ma[1]))
-		if err = json.Unmarshal([]byte(str), &props); err != nil {
+		client := new(http.Client)
+		resp, e := client.Do(req)
+		if e != nil {
+			err = e
 			return
 		}
-	}
+		defer resp.Body.Close()
+		dat, _ := ioutil.ReadAll(resp.Body)
 
-	if ma := regexp.MustCompile(`user\.login_status\s*=\s*['"](.*?)['"]`).FindSubmatch(dat); len(ma) > 0 {
-		switch string(ma[1]) {
-		case "not_login":
-			notLogin = true
-		case "login":
+		//fmt.Printf("%#v\n", resp.Header)
+
+		re := regexp.MustCompile(`data-props="(.*?)"`)
+		if ma := re.FindSubmatch(dat); len(ma) > 0 {
+			str := html.UnescapeString(string(ma[1]))
+			if err = json.Unmarshal([]byte(str), &props); err != nil {
+				return
+			}
+		}
+
+		if ma := regexp.MustCompile(`user\.login_status\s*=\s*['"](.*?)['"]`).FindSubmatch(dat); len(ma) > 0 {
+			switch string(ma[1]) {
+			case "not_login":
+				notLogin = true
+			case "login":
+				notLogin = false
+				break
+			}
 		}
 	}
 
