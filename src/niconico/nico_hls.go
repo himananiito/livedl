@@ -20,6 +20,7 @@ import (
 	"../obj"
 	"os/signal"
 	"sync"
+	"strings"
 )
 
 type OBJ = map[string]interface{}
@@ -648,7 +649,7 @@ func (hls *NicoHls) Wait() (shouldReconnect, done bool, err error) {
 func getProps(opt options.Option) (props interface{}, notLogin bool, err error) {
 	formats := []string{
 		"http://live2.nicovideo.jp/watch/%s",
-		"http://live.nicovideo.jp/watch/%s",
+	//	"http://live.nicovideo.jp/watch/%s",
 	}
 
 	for _, format := range formats {
@@ -658,32 +659,43 @@ func getProps(opt options.Option) (props interface{}, notLogin bool, err error) 
 			req.Header.Set("Cookie", "user_session=" + opt.NicoSession)
 		}
 
+		redirect2Gate := false
 		client := new(http.Client)
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) (err error) {
+			//fmt.Printf("redirect %v\n", req.URL.String())
+			// /gate/へのリダイレクトはHLS視聴不可とみなす(タイムシフト、コミュ限等)
+			if strings.Contains(req.URL.String(), "/gate/") {
+				redirect2Gate = true
+			}
+			return nil
+		}
 		resp, e := client.Do(req)
 		if e != nil {
 			err = e
 			return
 		}
 		defer resp.Body.Close()
+
 		dat, _ := ioutil.ReadAll(resp.Body)
 
-		//fmt.Printf("%#v\n", resp.Header)
+		if redirect2Gate {
+			return
+		}
 
-		re := regexp.MustCompile(`data-props="(.*?)"`)
-		if ma := re.FindSubmatch(dat); len(ma) > 0 {
+		if ma := regexp.MustCompile(`data-props="(.+?)"`).FindSubmatch(dat); len(ma) > 0 {
 			str := html.UnescapeString(string(ma[1]))
 			if err = json.Unmarshal([]byte(str), &props); err != nil {
 				return
 			}
-		}
+			return
 
-		if ma := regexp.MustCompile(`user\.login_status\s*=\s*['"](.*?)['"]`).FindSubmatch(dat); len(ma) > 0 {
+		} else if ma := regexp.MustCompile(`user\.login_status\s*=\s*['"](.*?)['"]`).FindSubmatch(dat); len(ma) > 0 {
 			switch string(ma[1]) {
 			case "not_login":
 				notLogin = true
 			case "login":
 				notLogin = false
-				break
+				return
 			}
 		}
 	}
