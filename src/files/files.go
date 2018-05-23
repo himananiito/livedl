@@ -1,4 +1,4 @@
-package file
+package files
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 )
 
 func GetFileNameNext (name string) (fileName string, err error) {
-	fileName = name
+	fileName = ReplaceForbidden(name)
 	_, test := os.Stat(fileName)
 	if test == nil {
 		// file Exists

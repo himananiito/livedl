@@ -15,12 +15,11 @@ import (
 	"github.com/grafov/m3u8"
 	"github.com/gorilla/websocket"
 	"../options"
-	"../file"
+	"../files"
 	"archive/zip"
 	"../obj"
 	"os/signal"
 	"sync"
-	"strings"
 )
 
 type OBJ = map[string]interface{}
@@ -153,7 +152,7 @@ func (media *NicoMedia) OpenFile() (err error) {
 		err = fmt.Errorf("Filename not set")
 		return
 	}
-	name, err := file.GetFileNameNext(media.fileName)
+	name, err := files.GetFileNameNext(media.fileName)
 
 	f, err := os.Create(name)
 	if err != nil {
@@ -659,14 +658,12 @@ func getProps(opt options.Option) (props interface{}, notLogin bool, err error) 
 			req.Header.Set("Cookie", "user_session=" + opt.NicoSession)
 		}
 
-		redirect2Gate := false
 		client := new(http.Client)
+		var redirect bool
 		client.CheckRedirect = func(req *http.Request, via []*http.Request) (err error) {
-			//fmt.Printf("redirect %v\n", req.URL.String())
-			// /gate/へのリダイレクトはHLS視聴不可とみなす(タイムシフト、コミュ限等)
-			if strings.Contains(req.URL.String(), "/gate/") {
-				redirect2Gate = true
-			}
+			//fmt.Printf("redirect to %v\n", req.URL.String())
+			// リダイレクトが走ったらHLSでは不可とみなす
+			redirect = true
 			return nil
 		}
 		resp, e := client.Do(req)
@@ -676,11 +673,11 @@ func getProps(opt options.Option) (props interface{}, notLogin bool, err error) 
 		}
 		defer resp.Body.Close()
 
-		dat, _ := ioutil.ReadAll(resp.Body)
-
-		if redirect2Gate {
+		if redirect {
 			return
 		}
+
+		dat, _ := ioutil.ReadAll(resp.Body)
 
 		if ma := regexp.MustCompile(`data-props="(.+?)"`).FindSubmatch(dat); len(ma) > 0 {
 			str := html.UnescapeString(string(ma[1]))
@@ -707,7 +704,7 @@ func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 
 	props, __notLogin, err := getProps(opt)
 	if err != nil {
-		fmt.Println(err)
+		//fmt.Println(err)
 		return
 	}
 	if __notLogin {
@@ -741,7 +738,7 @@ func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 		return
 	}
 
-	title = file.ReplaceForbidden(title)
+	title = files.ReplaceForbidden(title)
 
 	communityId, ok := obj.FindString(props, "community", "id")
 	if ! ok {

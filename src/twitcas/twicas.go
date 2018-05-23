@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"../file"
+	"../files"
 )
 
 type Twitcas struct {
@@ -134,7 +134,7 @@ func getStream(user, proxy string) (conn *websocket.Conn, movieId uint64, err er
 }
 
 func createFileUser(user string, movieId uint64) (f *os.File, filename string, err error) {
-	user = file.ReplaceForbidden(user)
+	user = files.ReplaceForbidden(user)
 	filename = fmt.Sprintf("%s_%d.mp4", user, movieId)
 	for i := 2; i < 1000; i++ {
 		_, err := os.Stat(filename)

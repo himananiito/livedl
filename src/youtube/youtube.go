@@ -19,7 +19,10 @@ import (
 	"sync"
 	"../obj"
 	"io"
-	"../file"
+	"../files"
+
+	"../httpsub"
+	"../zip2mp4"
 )
 
 type YtDash struct {
@@ -41,9 +44,11 @@ type YtDash struct {
 	zipWriter *zip.Writer
 	mZip sync.Mutex
 	fileName string
+	Title string
+	Id string
 }
 func (yt *YtDash) SetFileName(fileName string) {
-	yt.fileName = file.ReplaceForbidden(fileName)
+	yt.fileName = files.ReplaceForbidden(fileName)
 }
 func (yt *YtDash) fetch(isVideo, isBack bool) (fileName string, err error) {
 
@@ -94,14 +99,6 @@ func (yt *YtDash) fetch(isVideo, isBack bool) (fileName string, err error) {
 	}
 
 	switch query.Get("source") {
-	case "youtube":
-		if isVideo {
-			fileName = fmt.Sprintf("video.mp4")
-		} else {
-			fileName = fmt.Sprintf("audio.mp4")
-		}
-		err = yt.WriteZipBlocking(fileName, resp.Body)
-
 	case "yt_live_broadcast":
 
 		bs, e := ioutil.ReadAll(resp.Body)
@@ -137,7 +134,8 @@ func (yt *YtDash) fetch(isVideo, isBack bool) (fileName string, err error) {
 			fileName = fmt.Sprintf("audio-%d.mp4", sn)
 		}
 
-		if err = yt.WriteZip(fileName, bs); err != nil {
+		buff := bytes.NewBuffer(bs)
+		if err = yt.WriteZip(fileName, buff); err != nil {
 			return
 		}
 	}
@@ -162,6 +160,56 @@ func (yt *YtDash) fetchAudioBack() (string, error) {
 func (yt *YtDash) DecrSeqNoBack() {
 	yt.SeqNoBack--
 }
+func (yt *YtDash) RecordYoutube() {
+	var vname string
+	var aname string
+	func() {
+		uri := fmt.Sprintf("%s?%s", yt.VAddr, yt.VQuery.Encode())
+		vname = fmt.Sprintf("%s(%s)-v.mp4", yt.Title, yt.Id)
+fmt.Println(uri)
+		sub := httpsub.Get(uri, vname)
+		sub.Concurrent(4)
+		sub.Wait()
+	}()
+	func() {
+		uri := fmt.Sprintf("%s?%s", yt.AAddr, yt.AQuery.Encode())
+		aname = fmt.Sprintf("%s(%s)-a.mp4", yt.Title, yt.Id)
+		sub := httpsub.Get(uri, aname)
+		sub.Concurrent(4)
+		sub.Wait()
+	}()
+	if zip2mp4.FFmpegExists() {
+		exts := []string{"mp4", "mkv"}
+		for _, ext := range exts {
+			oname := fmt.Sprintf("%s(%s).%s", yt.Title, yt.Id, ext)
+			if zip2mp4.MergeVA(vname, aname, oname) {
+				os.Remove(vname)
+				os.Remove(aname)
+				return
+			} else {
+				os.Remove(oname)
+			}
+		}
+	}
+	// ffmpeg Not exists OR merge NG
+	fv, e := os.Open(vname)
+	if e != nil {
+		panic(e)
+	}
+	yt.WriteZip("video.mp4", fv)
+	fv.Close()
+
+	fa, e := os.Open(aname)
+	if e != nil {
+		panic(e)
+	}
+	yt.WriteZip("audio.mp4", fa)
+	fa.Close()
+
+	os.Remove(vname)
+	os.Remove(aname)
+
+}
 func (yt *YtDash) Wait() {
 
 	yt.ChEnd = make(chan bool)
@@ -169,8 +217,7 @@ func (yt *YtDash) Wait() {
 
 	switch yt.VQuery.Get("source") {
 	case "youtube":
-		panic("Not implemented")
-		return
+		yt.RecordYoutube()
 
 	case "yt_live_broadcast":
 		yt.RecordForward()
@@ -190,7 +237,7 @@ func (yt *YtDash) Close() {
 }
 func (yt *YtDash) OpenFile() (err error) {
 
-	fileName, err := file.GetFileNameNext(yt.fileName)
+	fileName, err := files.GetFileNameNext(yt.fileName)
 	if err != nil {
 		return
 	}
@@ -216,40 +263,8 @@ func (yt *YtDash) OpenFile() (err error) {
 	}()
 	return
 }
-func (yt *YtDash) WriteZipBlocking(name string, rdr io.Reader) (err error) {
-	if yt.zipFile == nil || yt.zipWriter == nil {
-		if err = yt.OpenFile(); err != nil {
-			return
-		}
-	}
 
-	wr, err := yt.zipWriter.Create(name)
-	if err != nil {
-		return
-	}
-
-	cunkSize := int64(100000)
-	for {
-		buff := bytes.NewBuffer(nil)
-		rb, e := io.CopyN(buff, rdr, cunkSize)
-		fmt.Printf("%v: read %#v bytes\n", name, rb)
-		if rb > 0 {
-			if _, err = io.Copy(wr, buff); err != nil {
-				return
-			}
-		}
-		if e != nil {
-			if e.Error() == "EOF" {
-				err = nil
-			} else {
-				err = e
-			}
-			return
-		}
-	}
-	return
-}
-func (yt *YtDash) WriteZip(name string, data []byte) (err error) {
+func (yt *YtDash) WriteZip(name string, rdr io.Reader) (err error) {
 	yt.mZip.Lock()
 	defer yt.mZip.Unlock()
 
@@ -262,7 +277,7 @@ func (yt *YtDash) WriteZip(name string, data []byte) (err error) {
 		return
 	}
 
-	if _, err = wr.Write(data); err != nil {
+	if _, err = io.Copy(wr, rdr); err != nil {
 		return
 	}
 	return
@@ -346,7 +361,7 @@ func Record(id string) (err error) {
 	}
 
 	// debug print
-	obj.PrintAsJson(a)
+	//obj.PrintAsJson(a)
 
 	title, ok := obj.FindString(a, "args", "title")
 	if (! ok) {
@@ -413,7 +428,10 @@ func Record(id string) (err error) {
 	yt := new(YtDash)
 	defer yt.Close()
 
-	yt.SetFileName(fmt.Sprintf("%s.zip", title))
+	yt.Id = id
+	yt.Title = files.ReplaceForbidden(title)
+
+	yt.SetFileName(fmt.Sprintf("%s(%s).zip", title, id))
 
 	yt.VAddr = varr[0]
 	vQuery, e := url.ParseQuery(varr[1])

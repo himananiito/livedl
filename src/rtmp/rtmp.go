@@ -12,7 +12,7 @@ import (
 	"../amf"
 	"../flv"
 	"../obj"
-	"../file"
+	"../files"
 )
 
 type chunkInfo struct {
@@ -193,7 +193,7 @@ func (rtmp *Rtmp) openFlv(incr bool) (err error) {
 	}
 	var fileName string
 	if incr {
-		if fileName, err = file.GetFileNameNext(rtmp.flvName); err != nil {
+		if fileName, err = files.GetFileNameNext(rtmp.flvName); err != nil {
 			return
 		}
 	} else {

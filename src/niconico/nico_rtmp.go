@@ -14,7 +14,7 @@ import (
 	"../rtmp"
 	"../amf"
 	"../options"
-	"../file"
+	"../files"
 )
 
 type Content struct {
@@ -128,7 +128,7 @@ func (status *Status) getFileName(index int) (name string) {
 		name = fmt.Sprintf("%s-%s-%s.flv", status.Id, status.CommunityId, status.Title)
 	} else if len(status.streams) > 1 {
 		//name = fmt.Sprintf("%s-%d.flv", status.Id, 1 + index)
-		name = fmt.Sprintf("%s-%s-%s-%d.flv", status.Id, status.CommunityId, status.Title, 1 + index)
+		name = fmt.Sprintf("%s-%s-%s#%d.flv", status.Id, status.CommunityId, status.Title, 1 + index)
 	} else {
 		log.Fatalf("No stream")
 	}
@@ -310,8 +310,8 @@ func (status *Status) recStream(index int) (err error) {
 		return
 	}
 
-	fileName := status.getFileName(index)
-	if fileName, err = file.GetFileNameNext(fileName); err != nil {
+	fileName, err := files.GetFileNameNext(status.getFileName(index))
+	if err != nil {
 		return
 	}
 	rtmpConn.SetFlvName(fileName)

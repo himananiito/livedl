@@ -31,10 +31,12 @@ var cmdListMP42TS = []string{
 	"./bin/bento4/bin/mp42ts",
 	"./bento4/bin/mp42ts",
 	"./bento4/mp42ts",
+	"./bin/bento4/mp42ts",
 	"./bin/mp42ts",
 	"./mp42ts",
 	"mp42ts",
 }
+// return cmd = nil if cmd not exists
 func openProg(cmdList *[]string, stdinEn, stdoutEn, stdErrEn, consoleEn bool, args []string) (cmd *exec.Cmd, stdin io.WriteCloser, stdout, stderr io.ReadCloser) {
 
 	for i, cmdName := range *cmdList {
@@ -83,7 +85,50 @@ func openProg(cmdList *[]string, stdinEn, stdoutEn, stdErrEn, consoleEn bool, ar
 	cmd = nil
 	return
 }
+func MergeVA(vFileName, aFileName, oFileName string) bool {
+	cmd, _, _, _ := openProg(&cmdListFF, false, false, false, true, []string{
+		"-i", vFileName,
+		"-i", aFileName,
+		"-c", "copy",
+		"-y",
+		oFileName,
+	})
+	if cmd == nil {
+		return false
+	}
+	if err := cmd.Wait(); err != nil {
+		fmt.Println(err)
+		return false
+	}
+	return true
+}
+func FFmpegExists() bool {
+	cmd, _, _, _ := openProg(&cmdListFF, false, false, false, false, []string{"-version"})
+	if cmd == nil {
+		return false
+	}
+	cmd.Wait()
+	return true
+}
+func GetFormat(fileName string) (vFormat, aFormat string) {
+	cmd, _, stdout, stderr := openProg(&cmdListFF, false, true, true, false, []string{"-i", fileName})
+	if cmd == nil {
+		return
+	}
+	b1, _ := ioutil.ReadAll(stdout)
+	b2, _ := ioutil.ReadAll(stderr)
+	cmd.Wait()
 
+	s := string(b1) + string(b2)
+	if ma := regexp.MustCompile(`(?i)Stream\s+#.+?:\s+Video:\s+(.*?),`).FindStringSubmatch(s); len(ma) > 0 {
+		vFormat = ma[1]
+	}
+	if ma := regexp.MustCompile(`(?i)Stream\s+#.+?:\s+Audio:\s+(.*?),`).FindStringSubmatch(s); len(ma) > 0 {
+		aFormat = ma[1]
+	}
+
+	return
+}
 func openFFMpeg(stdinEn, stdoutEn, stdErrEn, consoleEn bool, args []string) (cmd *exec.Cmd, stdin io.WriteCloser, stdout, stderr io.ReadCloser) {
 	return openProg(&cmdListFF, stdinEn, stdoutEn, stdErrEn, consoleEn, args)
 }
