@@ -11,7 +11,7 @@ import (
 	"log"
 	"net/http"
 	"time"
-	"../rtmp"
+	"../rtmps"
 	"../amf"
 	"../options"
 	"../files"
@@ -254,8 +254,13 @@ func (status *Status) isOfficialLive() bool {
 	return (status.Provider == "official") && (! status.IsArchive)
 }
 func (status *Status) isOfficialTs() bool {
-	return (status.IsArchive && status.Provider == "official") ||
-	(status.IsArchivePlayerServer && status.Provider == "channel")
+	if status.IsArchive {
+		switch status.Provider {
+		case "official": return true
+		case "channel": return status.IsArchivePlayerServer
+		}
+	}
+	return false
 }
 
 func (st Stream) relayStreamName(offset int) (s string) {
@@ -289,13 +294,12 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 
 	stream := status.streams[index]
 
-	tcUrl, e := status.tcUrl()
-	if e != nil {
-		err = e
+	tcUrl, err := status.tcUrl()
+	if err != nil {
 		return
 	}
 
-	rtmpConn, e := rtmp.NewRtmp(
+	rtmp, err := rtmps.NewRtmp(
 		// tcUrl
 		tcUrl,
 		// swfUrl
@@ -305,155 +309,203 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 		// option
 		status.Ticket,
 	)
-	if e != nil {
-		fmt.Printf("%v\n", e)
-		return
-	}
-
-	fileName, err := files.GetFileNameNext(status.getFileName(index))
 	if err != nil {
 		return
 	}
-	rtmpConn.SetFlvName(fileName)
+	defer rtmp.Close()
 
-// [FIXME] goto
-RETRY:
-	// default: 2500000
-	if err = rtmpConn.SetPeerBandwidth(100*1000*1000, 0); err != nil {
-		fmt.Printf("SetPeerBandwidth: %v\n", err)
-		return
-	}
+	tryRecord := func() (incomplete bool, err error) {
 
-	if err = rtmpConn.WindowAckSize(2500000); err != nil {
-		fmt.Printf("WindowAckSize: %v\n", err)
-		return
-	}
+		if err = rtmp.Connect(); err != nil {
+			return
+		}
 
-	if err = rtmpConn.CreateStream(); err != nil {
-		fmt.Printf("CreateStream %v\n", err)
-		return
-	}
-
-	if err = rtmpConn.SetBufferLength(0, 2000); err != nil {
-		fmt.Printf("SetBufferLength: %v\n", err)
-		return
-	}
-
-	var offset int
-	if status.IsArchive {
-		offset = 0
-	} else {
-		offset = -2
-	}
-	if status.isOfficialTs() {
-		err = rtmpConn.Command(
-			"sendFileRequest", []interface{} {
-			nil,
-			amf.SwitchToAmf3(),
-			[]string{
-				stream.streamName,
-			},
-		})
+		fileName, err := files.GetFileNameNext(status.getFileName(index))
 		if err != nil {
 			return
 		}
-	} else if (! status.isOfficialLive()) {
-		// /publishの第二引数
-		// streamName(param1:String)
-		// 「,」で区切る
-		// ._originUrl, streamName(playStreamName)
-		// streamName に、「?」がついてるなら originTickt となる
-		// streamName の.flvは削除する
-		// streamNameが/\.(f4v|mp4)$/iなら、頭にmp4:をつける
-		// /\.raw$/iなら、raw:をつける。
-		// relayStreamName: streamNameの頭からスラッシュまでを削除したもの
+		rtmp.SetFlvName(fileName)
 
-		err = rtmpConn.Command(
-			"nlPlayNotice", []interface{} {
-			nil,
-			// _connection.request.originUrl
-			stream.originUrl,
-
-			// this._connection.request.playStreamRequest
-			// originticket あるなら
-			// playStreamName ? this._originTicket
-			// 無いなら playStreamName
-			stream.noticeStreamName(offset),
-
-			// var _loc1_:String = this._relayStreamName;
-			// if(this._offset != -2)
-			// {
-			// _loc1_ = _loc1_ + ("_" + this.offset);
-			// }
-			// user nama: String 'lvxxxxxxxxx'
-			// user kako: lvxxxxxxxxx_xxxxxxxxxxxx_1_xxxxxx.f4v_0
-			stream.relayStreamName(offset),
-
-			// seek offset
-			// user nama: -2, user kako: 0
-			offset,
-		})
-		if err != nil {
-			fmt.Printf("nlPlayNotice %v\n", err)
+		// default: 2500000
+		if err = rtmp.SetPeerBandwidth(100*1000*1000, 0); err != nil {
+			fmt.Printf("SetPeerBandwidth: %v\n", err)
 			return
 		}
-	}
 
-	if err = rtmpConn.SetBufferLength(1, 3600 * 1000); err != nil {
-		fmt.Printf("SetBufferLength: %v\n", err)
-		return
-	}
+		if err = rtmp.WindowAckSize(2500000); err != nil {
+			fmt.Printf("WindowAckSize: %v\n", err)
+			return
+		}
 
-	rtmpConn.SetFixAggrTimestamp(true)
+		if err = rtmp.CreateStream(); err != nil {
+			fmt.Printf("CreateStream %v\n", err)
+			return
+		}
 
-	fmt.Printf("debug start play\n")
+		if err = rtmp.SetBufferLength(0, 2000); err != nil {
+			fmt.Printf("SetBufferLength: %v\n", err)
+			return
+		}
 
-	// user kako: lv*********_************_*_******.f4v_0
-	// official or channel ts: mp4:/content/********/lv*********_************_*_******.f4v
-	//if err = rtmpConn.Play(status.origin.playStreamName(status.isTsOfficial(), offset)); err != nil {
-	streamName, e := status.streamName(index, offset)
-	if e != nil {
-		err = e
-		return
-	}
-
-	if status.isOfficialTs() {
-		ts := rtmpConn.GetTimestamp()
-		if ts > 1000 {
-			err = rtmpConn.PlayTime(streamName, ts - 1000)
+		var offset int
+		if status.IsArchive {
+			offset = 0
 		} else {
-			err = rtmpConn.PlayTime(streamName, -5000)
+			offset = -2
 		}
 
-	} else if status.isTs() {
-		err = rtmpConn.PlayTime(streamName, -5000)
+		if status.isOfficialTs() {
+			for i := 0; true; i++ {
+				if i > 30 {
+					err = fmt.Errorf("sendFileRequest: No response")
+					return
+				}
+				data, e := rtmp.Command(
+					"sendFileRequest", []interface{} {
+					nil,
+					amf.SwitchToAmf3(),
+					[]string{
+						stream.streamName,
+					},
+				})
+				if e != nil {
+					err = e
+					return
+				}
 
-	} else {
-		err = rtmpConn.Play(streamName)
-	}
-	if err != nil {
-		fmt.Printf("Play: %v\n", err)
+				var resCnt int
+				switch data.(type) {
+				case map[string]interface{}:
+					resCnt = len(data.(map[string]interface{}))
+				case map[int]interface{}:
+					resCnt = len(data.(map[int]interface{}))
+				case []interface{}:
+					resCnt = len(data.([]interface{}))
+				case []string:
+					resCnt = len(data.([]string))
+				}
+				if resCnt > 0 {
+					break
+				}
+				time.Sleep(10 * time.Second)
+			}
+
+		} else if (! status.isOfficialLive()) {
+			// /publishの第二引数
+			// streamName(param1:String)
+			// 「,」で区切る
+			// ._originUrl, streamName(playStreamName)
+			// streamName に、「?」がついてるなら originTickt となる
+			// streamName の.flvは削除する
+			// streamNameが/\.(f4v|mp4)$/iなら、頭にmp4:をつける
+			// /\.raw$/iなら、raw:をつける。
+			// relayStreamName: streamNameの頭からスラッシュまでを削除したもの
+
+			_, err = rtmp.Command(
+				"nlPlayNotice", []interface{} {
+				nil,
+				// _connection.request.originUrl
+				stream.originUrl,
+
+				// this._connection.request.playStreamRequest
+				// originticket あるなら
+				// playStreamName ? this._originTicket
+				// 無いなら playStreamName
+				stream.noticeStreamName(offset),
+
+				// var _loc1_:String = this._relayStreamName;
+				// if(this._offset != -2)
+				// {
+				// _loc1_ = _loc1_ + ("_" + this.offset);
+				// }
+				// user nama: String 'lvxxxxxxxxx'
+				// user kako: lvxxxxxxxxx_xxxxxxxxxxxx_1_xxxxxx.f4v_0
+				stream.relayStreamName(offset),
+
+				// seek offset
+				// user nama: -2, user kako: 0
+				offset,
+			})
+			if err != nil {
+				fmt.Printf("nlPlayNotice %v\n", err)
+				return
+			}
+		}
+
+		if err = rtmp.SetBufferLength(1, 3600 * 1000); err != nil {
+			fmt.Printf("SetBufferLength: %v\n", err)
+			return
+		}
+
+		// No return
+		rtmp.SetFixAggrTimestamp(true)
+
+		// user kako: lv*********_************_*_******.f4v_0
+		// official or channel ts: mp4:/content/********/lv*********_************_*_******.f4v
+		//if err = rtmp.Play(status.origin.playStreamName(status.isTsOfficial(), offset)); err != nil {
+		streamName, err := status.streamName(index, offset)
+		if err != nil {
+			return
+		}
+
+		if status.isOfficialTs() {
+			ts := rtmp.GetTimestamp()
+			if ts > 1000 {
+				err = rtmp.PlayTime(streamName, ts - 1000)
+			} else {
+				err = rtmp.PlayTime(streamName, -5000)
+			}
+
+		} else if status.isTs() {
+			err = rtmp.PlayTime(streamName, -5000)
+
+		} else {
+			err = rtmp.Play(streamName)
+		}
+		if err != nil {
+			fmt.Printf("Play: %v\n", err)
+			return
+		}
+		// Non-recordedな過去録でseekしても、timestampが変わるだけで
+		// 最初からの再生となってしまうのでやらないこと
+
+		if opt.NicoTestTimeout > 0 {
+			// test mode
+			_, incomplete, err = rtmp.WaitTest(opt.NicoTestTimeout)
+		} else {
+			// normal mode
+			_, incomplete, err = rtmp.Wait()
+		}
 		return
-	}
-	// Non-recordedな過去録でseekしても、timestampが変わるだけで
-	// 最初からの再生となってしまうのでやらないこと
+	} // end func
 
-	if opt.NicoTestTimeout > 0 {
-		go func() {
-			time.Sleep(time.Second * time.Duration(opt.NicoTestTimeout))
-			rtmpConn.Close()
-		}()
+	ticketTime := time.Now().Unix()
+
+	for i := 0; i < 10; i++ {
+		incomplete, e := tryRecord()
+		if e != nil {
+			err = e
+			fmt.Printf("%v\n", e)
+			return
+		} else if incomplete && status.isOfficialTs() {
+			fmt.Println("incomplete")
+
+			// update ticket
+			if time.Now().Unix() > ticketTime + 60 {
+				ticketTime = time.Now().Unix()
+				if ticket, e := getTicket(opt); e != nil {
+					err = e
+					return
+				} else {
+					rtmp.SetConnectOpt(ticket)
+				}
+			}
+
+			continue
+		}
+		break
 	}
 
-	_, incomplete, err := rtmpConn.Wait()
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		return
-	}
-	if incomplete && status.isOfficialTs() {
-		rtmpConn.Connect()
-		goto RETRY
-	}
 	fmt.Printf("done\n")
 	return
 }
@@ -496,6 +548,22 @@ func (status *Status) recAllStreams(opt options.Option) (err error) {
 	return
 }
 
+func getTicket(opt options.Option) (ticket string, err error) {
+	status, notLogin, err := getStatus(opt)
+	if err != nil {
+		return
+	}
+	if status.Ticket != "" {
+		ticket = status.Ticket
+	} else {
+		if notLogin {
+			err = fmt.Errorf("notLogin")
+		} else {
+			err = fmt.Errorf("Ticket not found")
+		}
+	}
+	return
+}
 func getStatus(opt options.Option) (status *Status, notLogin bool, err error) {
 	var url string
 

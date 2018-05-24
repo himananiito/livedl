@@ -1,4 +1,4 @@
-package flv
+package flvs
 
 import (
 	"os"
@@ -6,18 +6,27 @@ import (
 	"io"
 	"encoding/binary"
 	"bytes"
+	"bufio"
 )
 
 type Flv struct {
 	filename string
 	file *os.File
+	writer *bufio.Writer
 	startAt int
 	audioTimestamp int
 	videoTimestamp int
 }
-
+func (flv *Flv) Flush() {
+	if flv.writer != nil {
+		flv.writer.Flush()
+	}
+}
 func (flv *Flv) Close() {
-	flv.file.Close()
+	flv.Flush()
+	if flv.file != nil {
+		flv.file.Close()
+	}
 }
 func Open(name string) (flv *Flv, err error) {
 	file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0777)
@@ -61,6 +70,10 @@ func Open(name string) (flv *Flv, err error) {
 	if ts != 0 {
 		fmt.Printf("[info] Seek point: %d\n", ts)
 	}
+
+
+	flv.writer = bufio.NewWriterSize(file, 256*1024)
+
 
 	return
 }
@@ -132,16 +145,16 @@ func (flv *Flv) writePacket(tag byte, rdr *bytes.Buffer, ts int) (err error) {
 	}
 
 	// header
-	if _, err = io.Copy(flv.file, buff); err != nil {
+	if _, err = io.Copy(flv.writer, buff); err != nil {
 		return
 	}
 	// data
-	if _, err = io.Copy(flv.file, rdr); err != nil {
+	if _, err = io.Copy(flv.writer, rdr); err != nil {
 		return
 	}
 
 	// PreviousTagSize
-	if _, err = flv.file.Write(tagSize); err != nil {
+	if _, err = flv.writer.Write(tagSize); err != nil {
 		return
 	}
 

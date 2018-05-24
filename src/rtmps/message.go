@@ -1,4 +1,4 @@
-package rtmp
+package rtmps
 
 import (
 	"encoding/binary"
@@ -421,11 +421,19 @@ func decodeHeader(rdr io.Reader, msg *rtmpMsg) (err error) {
 			if (msg.readingBody) {
 				msg.splitCount++
 				if msg.csId != msg.csIdOrigin {
-					log.Fatalf("decodeHeader: msg.csId != msg.csIdOrigin");
+					err = &DecodeError{
+						Fun: "decodeHeader",
+						Msg: fmt.Sprintf("msg.csId(%d) != msg.csIdOrigin(%d)", msg.csId, msg.csIdOrigin),
+					}
+					return
 				}
 			}
 		default:
-			log.Fatalf("decodeHeader: fmt is %#v", msg.format);
+			err = &DecodeError{
+				Fun: "decodeHeader",
+				Msg: fmt.Sprintf("Unknown fmt: %v", msg.format),
+			}
+			return
 	}
 
 	return
@@ -504,8 +512,11 @@ func decodeUserControl(rbuff *bytes.Buffer) (res []int, err error) {
 			res = append(res, bsz)
 
 		default:
-			fmt.Printf("Unknown User control %v\n", evt)
-			//log.Fatalf("Unknown User control %v", evt)
+			err = &DecodeError{
+				Fun: "decodeUserControl",
+				Msg: fmt.Sprintf("Unknown User control: %v", evt),
+			}
+			return
 	}
 	return
 }
@@ -585,7 +596,10 @@ func decodeOne(rdr io.Reader, csz int, info map[int] chunkInfo) (ts int, msg_t i
 	if msg.formatOrigin != 0 {
 		var ok bool
 		if prevChunk, ok = info[msg.csIdOrigin]; (! ok) {
-			err = fmt.Errorf("Not exists previous chunk(csId = %v)", msg.csIdOrigin)
+			err = &DecodeError{
+				Fun: "decodeOne",
+				Msg: fmt.Sprintf("Not exists previous chunk(csId = %v)", msg.csIdOrigin),
+			}
 			return
 		}
 	}
@@ -709,8 +723,11 @@ func decodeOne(rdr io.Reader, csz int, info map[int] chunkInfo) (ts int, msg_t i
 				return
 			}
 		default:
-			log.Printf("bytes: %#v", msg.bodyBuff.Bytes())
-			log.Fatalf("msgTypeId: not implement: msgTypeId: %d, %#v", msg.msgTypeId, msg)
+			err = &DecodeError{
+				Fun: "decodeOne",
+				Msg: fmt.Sprintf("msgTypeId: not implement: %v\n%#v", msg.msgTypeId, msg.bodyBuff.Bytes()),
+			}
+			return
 	}
 
 	return

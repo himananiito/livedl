@@ -50,6 +50,7 @@ COMMAND:
   -tcas    ツイキャスの録画
   -yt      YouTube Liveの録画
   -z2m     録画済みのzipをmp4に変換する(-zip-to-mp4)
+  -nico-test-run (debugging) test for nicolive
 
 オプション/option:
   -conf-pass <password> 設定ファイルのパスワード
@@ -64,9 +65,6 @@ COMMAND:
   -nico-rtmp-max-conn <num>      RTMPの同時接続数を設定
   -nico-rtmp-index <num>[,<num>] RTMP録画を行うメディアファイルの番号を指定
   -nico-status-https             [実験的] getplayerstatusの取得にhttpsを使用する
-
-オプション(debugging)
-  -nico-test-run                 test for nicolive
 
 FILE:
   ニコニコ生放送/nicolive:

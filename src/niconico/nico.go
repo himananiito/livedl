@@ -180,4 +180,5 @@ func TestRun(opt options.Option) (err error) {
 			return
 		}
 	}
+	return
 }
