@@ -31,6 +31,11 @@ func main() {
 			fmt.Println(err)
 			os.Exit(1)
 		}
+	case "NICOLIVE_TEST":
+		if err := niconico.TestRun(opt); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 
 	case "ZIP2MP4":
 		if err := zip2mp4.Convert(opt.ZipFile); err != nil {

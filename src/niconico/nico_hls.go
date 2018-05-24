@@ -444,7 +444,7 @@ func NewHls(broadcastId, webSocketUrl string) (hls *NicoHls, err error) {
 	return
 }
 
-func (hls *NicoHls) Wait() (shouldReconnect, done bool, err error) {
+func (hls *NicoHls) Wait(testTimeout int) (shouldReconnect, done bool, err error) {
 	chUrl := make(chan string)
 	ch403 := make(chan bool, 10)
 	chDone := make(chan bool, 10)
@@ -452,6 +452,14 @@ func (hls *NicoHls) Wait() (shouldReconnect, done bool, err error) {
 	chEndMain := make(chan bool)
 	chEndGo0 := make(chan bool)
 	chEndGo1 := make(chan bool)
+	chTimeout := make(chan bool)
+
+	if testTimeout > 0 {
+		go func() {
+			time.Sleep(time.Second * time.Duration(testTimeout))
+			chTimeout <- true
+		}()
+	}
 
 	// playlist loop
 	go func() {
@@ -501,6 +509,8 @@ func (hls *NicoHls) Wait() (shouldReconnect, done bool, err error) {
 				}
 
 			case <- chEndMain:
+				return
+			case <- chTimeout:
 				return
 			}
 		}
@@ -552,6 +562,8 @@ func (hls *NicoHls) Wait() (shouldReconnect, done bool, err error) {
 				case <- chEndGo0:
 					return
 				case <- chEndGo1:
+					return
+				case <- chTimeout:
 					return
 				default:
 			}
@@ -770,7 +782,7 @@ func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 	}
 
 	for {
-		shouldReconnect, d, e := hls.Wait()
+		shouldReconnect, d, e := hls.Wait(opt.NicoTestTimeout)
 		if d {
 			done = true
 			break

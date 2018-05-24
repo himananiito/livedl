@@ -283,11 +283,12 @@ func (rtmp *Rtmp) CheckStatus(label string, ts int, data interface{}, waitPause 
 }
 // trId: transaction id to find
 func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trFound, pauseFound bool, err error) {
-	rtmp.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	rtmp.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	ts, msg_t, res, rdbytes, err := decodeOne(rtmp.conn, rtmp.chunkSizeRecv, rtmp.chunkInfo)
 	if err != nil {
 		if rdbytes == 0 {
-			err = nil
+			//[FIXME]下記が必要ならコメントを残す
+			//err = nil
 			return
 		}
 		return
@@ -298,7 +299,9 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 	rtmp.readCount += rdbytes
 	if rtmp.readCount >= (rtmp.windowSize / 2) {
 		rtmp.readCount = 0
-		rtmp.acknowledgement()
+		if err = rtmp.acknowledgement(); err != nil {
+			return
+		}
 	}
 
 	// debug log
@@ -476,7 +479,9 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 		switch res.([]int)[0] {
 			case UC_PINGREQUEST:
 				//fmt.Printf("ping request %d\n", res.([]int)[1])
-				rtmp.pingResponse(res.([]int)[1])
+				if err = rtmp.pingResponse(res.([]int)[1]); err != nil {
+					return
+				}
 
 			case UC_STREAMBEGIN:
 				rtmp.streamId = res.([]int)[1]

@@ -224,7 +224,7 @@ func decodeFmtCsId(rdr io.Reader, msg *rtmpMsg) (err error) {
 		case 0:
 			b1 := make([]byte, 1)
 			msg.hdrLength++
-			_, err = io.ReadFull(rdr, b1); if err != nil {
+			if _, err = io.ReadFull(rdr, b1); err != nil {
 				return
 			}
 			csId = int(b1[0]) + 64
@@ -232,7 +232,7 @@ func decodeFmtCsId(rdr io.Reader, msg *rtmpMsg) (err error) {
 		case 1:
 			b1 := make([]byte, 2)
 			msg.hdrLength += 2
-			_, err = io.ReadFull(rdr, b1); if err != nil {
+			if _, err = io.ReadFull(rdr, b1); err != nil {
 				return
 			}
 			csId = (int(b1[1]) << 8) | (int(b1[0]) + 64)

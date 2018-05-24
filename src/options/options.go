@@ -22,6 +22,7 @@ type Option struct {
 	NicoRtmpOnly bool
 	NicoRtmpIndex map[int]bool
 	NicoHlsOnly bool
+	NicoTestTimeout int
 	TcasId string
 	YoutubeId string
 	ConfFile string
@@ -63,6 +64,9 @@ COMMAND:
   -nico-rtmp-max-conn <num>      RTMPの同時接続数を設定
   -nico-rtmp-index <num>[,<num>] RTMP録画を行うメディアファイルの番号を指定
   -nico-status-https             [実験的] getplayerstatusの取得にhttpsを使用する
+
+オプション(debugging)
+  -nico-test-run                 test for nicolive
 
 FILE:
   ニコニコ生放送/nicolive:
@@ -113,6 +117,8 @@ func ParseArgs() (opt Option) {
 				case "", "NICOLIVE":
 					opt.NicoLiveId = match[2]
 					opt.Command = "NICOLIVE"
+				case "NICOLIVE_TEST":
+					opt.NicoLiveId = match[2]
 			}
 			return nil
 		}},
@@ -136,6 +142,10 @@ func ParseArgs() (opt Option) {
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico\z`), func() error {
 			opt.Command = "NICOLIVE"
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?test-?run\z`), func() error {
+			opt.Command = "NICOLIVE_TEST"
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?tcas\z`), func() error {
@@ -328,7 +338,7 @@ func ParseArgs() (opt Option) {
 		if opt.YoutubeId == "" {
 			Help()
 		}
-	case "NICOLIVE":
+	case "NICOLIVE", "NICOLIVE_TEST":
 		if opt.NicoLiveId == "" {
 			Help()
 		}

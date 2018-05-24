@@ -10,7 +10,7 @@ import (
 	"sync"
 	"log"
 	"net/http"
-
+	"time"
 	"../rtmp"
 	"../amf"
 	"../options"
@@ -281,7 +281,7 @@ func (st Stream) noticeStreamName(offset int) (s string) {
 	return
 }
 
-func (status *Status) recStream(index int) (err error) {
+func (status *Status) recStream(index int, opt options.Option) (err error) {
 	defer func(){
 		<-status.chStream
 		status.wg.Done()
@@ -438,6 +438,13 @@ RETRY:
 	// Non-recordedな過去録でseekしても、timestampが変わるだけで
 	// 最初からの再生となってしまうのでやらないこと
 
+	if opt.NicoTestTimeout > 0 {
+		go func() {
+			time.Sleep(time.Second * time.Duration(opt.NicoTestTimeout))
+			rtmpConn.Close()
+		}()
+	}
+
 	_, incomplete, err := rtmpConn.Wait()
 	if err != nil {
 		fmt.Printf("%v\n", err)
@@ -481,7 +488,7 @@ func (status *Status) recAllStreams(opt options.Option) (err error) {
 		status.chStream <- true
 		status.wg.Add(1)
 
-		go status.recStream(index)
+		go status.recStream(index, opt)
 	}
 
 	status.wg.Wait()

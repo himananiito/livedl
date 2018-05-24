@@ -10,6 +10,8 @@ import (
 	"../options"
 	"io/ioutil"
 	"regexp"
+	"strconv"
+	"os"
 )
 
 func NicoLogin(id, pass string, opt options.Option) (err error) {
@@ -113,4 +115,69 @@ func Record(opt options.Option) (err error) {
 	}
 
 	return
+}
+
+func TestRun(opt options.Option) (err error) {
+	var start int64
+	if ma := regexp.MustCompile(`\Alv(\d+)\z`).FindStringSubmatch(opt.NicoLiveId); len(ma) > 0 {
+		if start, err = strconv.ParseInt(ma[1], 10, 64); err != nil {
+			fmt.Println(err)
+			return
+		}
+	} else {
+		fmt.Println("TestRun: NicoLiveId not specified")
+		return
+	}
+
+	opt.NicoRtmpIndex = map[int]bool{
+		0: true,
+	}
+
+	if opt.NicoTestTimeout <= 0 {
+		opt.NicoTestTimeout = 3
+	}
+
+	//chErr := make(chan error)
+	var NFCount int
+	for id := start; id < (start + 100) ; id++ {
+		opt.NicoLiveId = fmt.Sprintf("lv%d", id)
+
+		fmt.Fprintf(os.Stderr, "start test: %s\n", opt.NicoLiveId)
+		var msg string
+		err = Record(opt)
+		if err != nil {
+			if ma := regexp.MustCompile(`\AError\s+code:\s*(\S+)`).FindStringSubmatch(err.Error()); len(ma) > 0 {
+				msg = ma[1]
+				switch ma[1] {
+				case "notfound", "closed", "comingsoon", "timeshift_ticket_exhaust":
+				case "deletedbyuser", "deletedbyvisor", "violated":
+				case "usertimeshift", "tsarchive", "require_community_member",
+				     "noauth", "full", "premium_only", "selected-country":
+				default:
+					fmt.Fprintf(os.Stderr, "unknown: %s\n", ma[1])
+					return
+				}
+
+			} else if strings.Contains(err.Error(), "closed network") {
+				msg = "OK"
+			} else {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+		} else {
+			msg = "OK"
+		}
+
+		fmt.Fprintf(os.Stderr, "%s: %s\n", opt.NicoLiveId, msg)
+		id++
+
+		if msg == "notfound" {
+			NFCount++
+		} else {
+			NFCount = 0
+		}
+		if NFCount >= 10 {
+			return
+		}
+	}
 }
