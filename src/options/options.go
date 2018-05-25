@@ -336,10 +336,11 @@ func ParseArgs() (opt Option) {
 		if opt.YoutubeId == "" {
 			Help()
 		}
-	case "NICOLIVE", "NICOLIVE_TEST":
+	case "NICOLIVE":
 		if opt.NicoLiveId == "" {
 			Help()
 		}
+	case "NICOLIVE_TEST":
 	case "TWITCAS":
 		if opt.TcasId == "" {
 			Help()

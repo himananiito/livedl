@@ -66,7 +66,7 @@ func (hls *NicoHls) Close() {
 	hls.CloseFile()
 }
 
-func getPlaylist(uri *url.URL) (nextUri *url.URL, mediapl *m3u8.MediaPlaylist, is403 bool, err error) {
+func getPlaylist(uri *url.URL) (nextUri *url.URL, mediapl *m3u8.MediaPlaylist, is403, is404 bool, err error) {
 	resp, err := http.Get(uri.String())
 	if err != nil {
 		return
@@ -77,6 +77,9 @@ func getPlaylist(uri *url.URL) (nextUri *url.URL, mediapl *m3u8.MediaPlaylist, i
 	case 200:
 	case 403:
 		is403 = true
+		return
+	case 404:
+		is404 = true
 		return
 	default:
 		err = fmt.Errorf("StatusCode is %v", resp.StatusCode)
@@ -111,7 +114,7 @@ func getPlaylist(uri *url.URL) (nextUri *url.URL, mediapl *m3u8.MediaPlaylist, i
 		}
 		fmt.Printf("selected bandwidth: %d\n", bw)
 		if nextUri.String() != "" && uri.String() != nextUri.String() {
-			nextUri, mediapl, is403, err = getPlaylist(nextUri)
+			nextUri, mediapl, is403, is404, err = getPlaylist(nextUri)
 			return
 		}
 	}
@@ -204,7 +207,7 @@ func (media *NicoMedia) WriteChunk(seqNo uint64, rdr io.Reader) (err error) {
 		}
 	}
 
-	fmt.Printf("Current SeqNo: %d\n", seqNo)
+	fmt.Printf("SeqNo: %d : %s\n", seqNo, media.fileNameOpened)
 
 	media.AddContains(seqNo)
 	return
@@ -239,17 +242,30 @@ func (media *NicoMedia) GetMedia1(seq Seq) (is403, is404 bool, err error) {
 	return
 }
 func (media *NicoMedia) GetMedias() (is403 bool, err error) {
-	var uri *url.URL
 	var mediapl *m3u8.MediaPlaylist
-	uri, mediapl, is403, err = getPlaylist(media.playlistUrl)
-	if err != nil {
-		fmt.Println(err)
+	for i :=0; i < 10; i++ {
+		var uri *url.URL
+		var is404 bool
+		uri, mediapl, is403, is404, err = getPlaylist(media.playlistUrl)
+		if err != nil {
+			fmt.Printf("GetMedias/getPlaylist: %v\n", err)
+			return
+		}
+		if is404 {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		if is403 {
+			return
+		}
+		if uri != nil {
+			media.playlistUrl = uri
+		}
+		break
+	}
+	if mediapl == nil {
 		return
 	}
-	if is403 {
-		return
-	}
-	media.playlistUrl = uri
 
 	// 次にplaylistを取得する時刻を設定
 	func() {
@@ -314,9 +330,9 @@ func (media *NicoMedia) GetMedias() (is403 bool, err error) {
 		})
 	}
 
-	for i := mediapl.SeqNo - 1; (i >= 0) && (i > mediapl.SeqNo - 10); i-- {
+	for i := int64(mediapl.SeqNo) - 1; (i >= 0) && (i > int64(mediapl.SeqNo) - 10); i-- {
 		var is404 bool
-		is403, is404, err = getNicoTsChunk(i)
+		is403, is404, err = getNicoTsChunk(uint64(i))
 		if err != nil {
 			panic(err)
 		}

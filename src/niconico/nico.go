@@ -12,6 +12,9 @@ import (
 	"regexp"
 	"strconv"
 	"os"
+	"net"
+	"encoding/xml"
+	"bufio"
 )
 
 func NicoLogin(id, pass string, opt options.Option) (err error) {
@@ -118,19 +121,124 @@ func Record(opt options.Option) (err error) {
 }
 
 func TestRun(opt options.Option) (err error) {
-	var start int64
-	if ma := regexp.MustCompile(`\Alv(\d+)\z`).FindStringSubmatch(opt.NicoLiveId); len(ma) > 0 {
-		if start, err = strconv.ParseInt(ma[1], 10, 64); err != nil {
-			fmt.Println(err)
-			return
-		}
-	} else {
-		fmt.Println("TestRun: NicoLiveId not specified")
-		return
-	}
 
 	opt.NicoRtmpIndex = map[int]bool{
 		0: true,
+	}
+
+	var nextId func() string
+
+	if opt.NicoLiveId == "" {
+		// niconama alert
+
+		if opt.NicoTestTimeout <= 0 {
+			opt.NicoTestTimeout = 12
+		}
+
+		resp, e := http.Get("http://live.nicovideo.jp/api/getalertinfo")
+		if e != nil {
+			err = e
+			return
+		}
+		defer resp.Body.Close()
+
+		switch resp.StatusCode {
+		case 200:
+		default:
+			err = fmt.Errorf("StatusCode is %v", resp.StatusCode)
+			return
+		}
+
+		type Alert struct {
+			User     string `xml:"user_id"`
+			UserHash string `xml:"user_hash"`
+			Addr     string `xml:"ms>addr"`
+			Port     string `xml:"ms>port"`
+			Thread   string `xml:"ms>thread"`
+		}
+		status := &Alert{}
+		dat, _ := ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		err = xml.Unmarshal(dat, status)
+		if err != nil {
+			fmt.Println(string(dat))
+			fmt.Printf("error: %v", err)
+			return
+		}
+
+		raddr, e := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%s", status.Addr, status.Port))
+		if e != nil {
+			fmt.Printf("%v\n", e)
+			return
+		}
+
+		conn, e := net.DialTCP("tcp", nil, raddr)
+		if e != nil {
+			err = e
+			return
+		}
+		defer conn.Close()
+
+		msg := fmt.Sprintf(`<thread thread="%s" version="20061206" res_from="-1"/>%c`, status.Thread, 0)
+		if _, err = conn.Write([]byte(msg)); err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		rdr := bufio.NewReader(conn)
+
+		chLatest := make(chan string, 1000)
+		go func(){
+			for {
+				s, e := rdr.ReadString(0)
+				if e != nil {
+					fmt.Println(e)
+					err = e
+					return
+				}
+				if ma := regexp.MustCompile(`>(\d+),\S+,\S+<`).FindStringSubmatch(s); len(ma) > 0 {
+					L0:for {
+						select {
+							case <-chLatest:
+							default:
+								break L0
+						}
+					}
+					chLatest <- ma[1]
+				}
+			}
+		}()
+
+		nextId = func() (string) {
+			L1:for {
+				select {
+					case <-chLatest:
+					default:
+						break L1
+				}
+			}
+			return <-chLatest
+		}
+
+	} else {
+		// start from NicoLiveId
+		var id int64
+		if ma := regexp.MustCompile(`\Alv(\d+)\z`).FindStringSubmatch(opt.NicoLiveId); len(ma) > 0 {
+			if id, err = strconv.ParseInt(ma[1], 10, 64); err != nil {
+				fmt.Println(err)
+				return
+			}
+		} else {
+			fmt.Println("TestRun: NicoLiveId not specified")
+			return
+		}
+
+		nextId = func() (s string) {
+			s = fmt.Sprintf("%d", id)
+			id++
+			return
+		}
 	}
 
 	if opt.NicoTestTimeout <= 0 {
@@ -139,8 +247,9 @@ func TestRun(opt options.Option) (err error) {
 
 	//chErr := make(chan error)
 	var NFCount int
-	for id := start; id < (start + 100) ; id++ {
-		opt.NicoLiveId = fmt.Sprintf("lv%d", id)
+	var endCount int
+	for {
+		opt.NicoLiveId = fmt.Sprintf("lv%s", nextId())
 
 		fmt.Fprintf(os.Stderr, "start test: %s\n", opt.NicoLiveId)
 		var msg string
@@ -168,8 +277,11 @@ func TestRun(opt options.Option) (err error) {
 			msg = "OK"
 		}
 
-		fmt.Fprintf(os.Stderr, "%s: %s\n", opt.NicoLiveId, msg)
-		id++
+		fmt.Fprintf(os.Stderr, "%s: %s\n---------\n", opt.NicoLiveId, msg)
+		endCount++
+		if endCount > 100 {
+			break
+		}
 
 		if msg == "notfound" {
 			NFCount++

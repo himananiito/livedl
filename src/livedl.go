@@ -3,7 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
-
+	"path/filepath"
+	"regexp"
 	"./options"
 	"./twitcas"
 	"./niconico"
@@ -12,6 +13,28 @@ import (
 )
 
 func main() {
+	var baseDir string
+	if regexp.MustCompile(`\AC:\\.*\\Temp\\go-build[^\\]*\\[^\\]+\\exe\\[^\\]*\.exe\z`).MatchString(os.Args[0]) {
+		// go runで起動時
+		pwd, e := os.Getwd()
+		if e != nil {
+			fmt.Println(e)
+			return
+		}
+		baseDir = pwd
+	} else {
+		pa, e := filepath.Abs(os.Args[0])
+		if e != nil {
+			fmt.Println(e)
+			return
+		}
+		baseDir = filepath.Dir(pa)
+	}
+	fmt.Printf("chdir: %s\n", baseDir)
+	if e := os.Chdir(baseDir); e != nil {
+		fmt.Println(e)
+		return
+	}
 
 	opt := options.ParseArgs()
 
