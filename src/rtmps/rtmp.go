@@ -63,6 +63,7 @@ type Rtmp struct {
 	nextLogTs int
 
 	VideoExists bool
+	noSeek bool
 }
 
 func NewRtmp(tc, swf, page string, opt... interface{})(rtmp *Rtmp, err error) {
@@ -109,6 +110,9 @@ func (rtmp *Rtmp) Connect() (err error) {
 		rtmp.connectOpt...,
 	)
 	return
+}
+func (rtmp *Rtmp) SetNoSeek(b bool) {
+	rtmp.noSeek = b
 }
 func (rtmp *Rtmp) SetConnectOpt(opt... interface{}) {
 	rtmp.connectOpt = opt
@@ -165,46 +169,80 @@ func (rtmp *Rtmp) connect(app, tc, swf, page string, opt... interface{}) (err er
 	return
 }
 
-func (rtmp *Rtmp) WaitPause() (done, incomplete bool, err error) {
-	var pause bool
-	for {
-		done, incomplete, _, pause, _, err = rtmp.recvChunk(-1, true)
-		if err != nil || done || incomplete || pause {
-			return
-		}
+const (
+	NORMAL = iota
+	COMMAND
+	PAUSE
+	TEST
+)
+func (rtmp *Rtmp) wait(findTrId int, pause bool, testTimeout int) (done, incomplete bool, trData interface{}, err error) {
+	var mode int
+	var endUnix int64
+	var endTime time.Time
+	if findTrId >= 0 {
+		mode = COMMAND
+	} else if pause {
+		mode = PAUSE
+	} else if testTimeout > 0 {
+		mode = TEST
+		endUnix = time.Now().Unix() + int64(testTimeout)
+		endTime = time.Unix(endUnix, 0)
 	}
-	return
-}
-func (rtmp *Rtmp) WaitTest(sec int) (done, incomplete bool, err error) {
-	defer rtmp.flv.Flush()
-	end := time.Now().Unix() + int64(sec)
+
+	if mode != COMMAND {
+		findTrId = -1
+	}
+
 	for {
-		done, incomplete, _, _, _, err = rtmp.recvChunk(-1, false)
-		if err != nil {
+		if mode == TEST {
+			rtmp.conn.SetReadDeadline(endTime)
+		} else {
+			rtmp.conn.SetReadDeadline(time.Now().Add(300 * time.Second))
+		}
+		__done, __incomplete, trFound, pause, __trData, e := rtmp.recvChunk(findTrId, pause)
+
+		if e != nil {
+			err = e
 			return
 		}
-		if done || incomplete {
+		if __done || __incomplete {
+			done = __done
+			incomplete = __incomplete
 			return
 		}
-		if sec > 0 {
-			if time.Now().Unix() >= end {
+
+		switch mode {
+		case COMMAND:
+			if trFound {
+				trData = __trData
+				return
+			}
+		case PAUSE:
+			if pause {
+				return
+			}
+		case TEST:
+			if time.Now().Unix() >= endUnix {
 				return
 			}
 		}
 	}
+}
+
+func (rtmp *Rtmp) WaitPause() (done, incomplete bool, err error) {
+	done, incomplete, _, err = rtmp.wait(-1, true, -1)
+	return
+}
+func (rtmp *Rtmp) WaitTest(testTimeout int) (done, incomplete bool, err error) {
+	done, incomplete, _, err = rtmp.wait(-1, false, testTimeout)
 	return
 }
 func (rtmp *Rtmp) Wait() (done, incomplete bool, err error) {
-	return rtmp.WaitTest(0)
+	done, incomplete, _, err = rtmp.wait(-1, false, -1)
+	return
 }
 func (rtmp *Rtmp) waitCommand(findTrId int) (done, incomplete bool, trData interface{}, err error) {
-	var trFound bool
-	for {
-		done, incomplete, trFound, _, trData, err = rtmp.recvChunk(findTrId, false)
-		if err != nil || done || incomplete || trFound {
-			return
-		}
-	}
+	done, incomplete, trData, err = rtmp.wait(findTrId, false, -1)
 	return
 }
 func (rtmp *Rtmp) SetFlvName(name string) {
@@ -232,6 +270,9 @@ func (rtmp *Rtmp) openFlv(incr bool) (err error) {
 }
 func (rtmp *Rtmp) GetTimestamp() int {
 	return rtmp.timestamp
+}
+func (rtmp *Rtmp) SetTimestamp(t int) {
+	rtmp.timestamp = t
 }
 func (rtmp *Rtmp) writeMetaData(body map[string]interface{}, ts int) (err error) {
 
@@ -292,7 +333,7 @@ func (rtmp *Rtmp) CheckStatus(label string, ts int, data interface{}, waitPause 
 	case "NetStream.Unpause.Notify":
 	case "NetStream.Play.Stop":
 	case "NetStream.Play.Complete":
-		fmt.Printf("NetStream.Play.Complete: last timestamp: %d\n", rtmp.flv.GetLastTimestamp())
+		fmt.Printf("NetStream.Play.Complete: last timestamp: %d(flv)\n", rtmp.flv.GetLastTimestamp())
 		if (ts + 1000) > rtmp.duration {
 			done = true
 		} else {
@@ -300,6 +341,9 @@ func (rtmp *Rtmp) CheckStatus(label string, ts int, data interface{}, waitPause 
 		}
 	case "NetStream.Play.Start":
 	case "NetStream.Play.Reset":
+	case "NetStream.Seek.Notify":
+	case "NetStream.Play.Failed":
+		done = true
 	default:
 		fmt.Printf("[FIXME] Unknown Code: %s\n", code)
 	}
@@ -307,7 +351,6 @@ func (rtmp *Rtmp) CheckStatus(label string, ts int, data interface{}, waitPause 
 }
 // trId: transaction id to find
 func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trFound, pauseFound bool, trData interface{}, err error) {
-	rtmp.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	ts, msg_t, res, rdbytes, err := decodeOne(rtmp.conn, rtmp.chunkSizeRecv, rtmp.chunkInfo)
 	if err != nil {
 		switch err.(type) {
@@ -519,6 +562,10 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 			case UC_BUFFEREMPTY:
 				if rtmp.isRecorded {
 					fmt.Printf("required Seek: %d\n", rtmp.timestamp)
+					if rtmp.noSeek {
+						incomplete = true
+						return
+					}
 					ts := rtmp.timestamp - 10000
 					if ts < 0 {
 						ts = 0

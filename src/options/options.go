@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"io/ioutil"
 	"../buildno"
+	"../cryptoconf"
 )
 
 type Option struct {
@@ -50,7 +51,6 @@ COMMAND:
   -tcas    ツイキャスの録画
   -yt      YouTube Liveの録画
   -z2m     録画済みのzipをmp4に変換する(-zip-to-mp4)
-  -nico-test-run (debugging) test for nicolive
 
 オプション/option:
   -conf-pass <password> 設定ファイルのパスワード
@@ -65,6 +65,11 @@ COMMAND:
   -nico-rtmp-max-conn <num>      RTMPの同時接続数を設定
   -nico-rtmp-index <num>[,<num>] RTMP録画を行うメディアファイルの番号を指定
   -nico-status-https             [実験的] getplayerstatusの取得にhttpsを使用する
+
+COMMAND(debugging)
+  -nico-test-run (debugging) test for nicolive
+option(debugging)
+  -nico-test-timeout <num> timeout for each test
 
 FILE:
   ニコニコ生放送/nicolive:
@@ -128,7 +133,7 @@ func ParseArgs() (opt Option) {
 			opt.ConfPass = str
 			return
 		}},
-		Parser{regexp.MustCompile(`\Ahttps?://twitcasting\.tv/(\S+)\z`), func() error {
+		Parser{regexp.MustCompile(`\Ahttps?://twitcasting\.tv/([^/]+)(?:/.*)?\z`), func() error {
 			opt.TcasId = match[1]
 			opt.Command = "TWITCAS"
 			return nil
@@ -144,6 +149,21 @@ func ParseArgs() (opt Option) {
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?test-?run\z`), func() error {
 			opt.Command = "NICOLIVE_TEST"
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?test-?timeout\z`), func() error {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--nico-test-timeout: Not a number: %s\n", s)
+			}
+			if num <= 0 {
+				return fmt.Errorf("--nico-test-timeout: Invalid: %d: must be greater than or equal to 1\n", num)
+			}
+			opt.NicoTestTimeout = num
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?tcas\z`), func() error {
@@ -326,6 +346,23 @@ func ParseArgs() (opt Option) {
 
 	if opt.ConfFile == "" {
 		opt.ConfFile = fmt.Sprintf("%s.conf", getCmd())
+	}
+
+	// store account
+	setData := map[string]string{}
+	if opt.NicoLoginId != "" || opt.NicoLoginPass != "" {
+		setData["NicoLoginId"] = opt.NicoLoginId
+		setData["NicoLoginPass"] = opt.NicoLoginPass
+	}
+	if opt.NicoSession != "" {
+		setData["NicoSession"] = opt.NicoSession
+	}
+	if len(setData) > 0 {
+		if err := cryptoconf.Set(setData, opt.ConfFile, opt.ConfPass); err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Println("account saved")
 	}
 
 	switch opt.Command {

@@ -12,7 +12,12 @@ if(Test-Path -PathType Container $dir) {
 mkdir $dir
 cp livedl.exe $dir
 cp Readme.md $dir
-cp LICENSE $dir
+
+cp livedl-gui.exe $dir
+cp livedl-gui.exe.config $dir
+cp Newtonsoft.Json.dll $dir
+cp Newtonsoft.Json.xml $dir
+
 Compress-Archive -Path $dir -DestinationPath $zip
 
 if(Test-Path -PathType Container $dir) {

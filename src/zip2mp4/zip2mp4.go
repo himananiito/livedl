@@ -11,6 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"io/ioutil"
+	"path/filepath"
+	"../files"
+	"../log4gui"
 )
 
 type ZipMp4 struct {
@@ -150,6 +153,14 @@ func (z *ZipMp4) CloseFFInput() {
 func (z *ZipMp4) OpenFFMpeg() {
 	name := regexp.MustCompile(`(?i)\.zip\z`).ReplaceAllString(z.ZipName, "")
 	name = fmt.Sprintf("%s.mp4", name)
+	dir := filepath.Dir(name)
+	base := filepath.Base(name)
+	base, err := files.GetFileNameNext(base)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	name = filepath.Join(dir, base)
 	z.Mp4NameOpened = name
 
 	cmd, stdin, _, _ := openFFMpeg(true, false, false, true, []string{
@@ -235,20 +246,10 @@ func Convert(fileName string) (err error) {
 		return
 	}
 
-	z := &ZipMp4{ZipName: fileName}
-	z.OpenFFMpeg()
-
-	defer func() {
-		z.CloseFFInput()
-		z.Wait()
-	}()
-
 	chunks := make(map[int64]Chunk)
 
 	for i, r := range zr.File {
 		//fmt.Printf("X %v %v\n", i, r.Name)
-
-			//return
 
 		if ma := regexp.MustCompile(`\Avideo-(\d+)\.\w+\z`).FindStringSubmatch(r.Name); len(ma) > 0 {
 			num, err := strconv.ParseInt(string(ma[1]), 10, 64)
@@ -288,26 +289,47 @@ func Convert(fileName string) (err error) {
 			}
 			//fmt.Printf("V+A %v %v\n", num, r.Name)
 		} else {
-			fmt.Printf("X %v %v\n", i, r.Name)
+			fmt.Printf("%v %v\n", i, r.Name)
+			log4gui.Info(fmt.Sprintf("Unsupported zip: %s", fileName))
+			os.Exit(1)
 		}
 	}
 
-    keys := make([]int64, 0, len(chunks))
-    for k := range chunks {
-        keys = append(keys, k)
-    }
+	keys := make([]int64, 0, len(chunks))
+	for k := range chunks {
+		keys = append(keys, k)
+	}
 
 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 
 	var tmpVideoName string
 	var tmpAudioName string
 
+	var zm *ZipMp4
+	defer func() {
+		if zm != nil {
+			zm.CloseFFInput()
+			zm.Wait()
+		}
+	}()
+
+	zm = &ZipMp4{ZipName: fileName}
+	zm.OpenFFMpeg()
+
 	prevIndex := int64(-1)
 	for _, key := range keys {
 		if prevIndex >= 0 {
 			if key != prevIndex + 1 {
 				// [FIXME] reopen new mp4file?
-				return fmt.Errorf("\n\nError: seq skipped: %d --> %d\n\n", prevIndex, key)
+				//return fmt.Errorf("\n\nError: seq skipped: %d --> %d\n\n", prevIndex, key)
+
+				fmt.Printf("\nSeqNo. skipped: %d --> %d\n", prevIndex, key)
+				if zm != nil {
+					zm.CloseFFInput()
+					zm.Wait()
+				}
+				zm = &ZipMp4{ZipName: fileName}
+				zm.OpenFFMpeg()
 			}
 		}
 		prevIndex = key
@@ -317,7 +339,7 @@ func Convert(fileName string) (err error) {
 			if e != nil {
 				panic(e)
 			}
-			z.FFInput(r)
+			zm.FFInput(r)
 			r.Close()
 
 		} else if chunks[key].VideoIndex != nil && chunks[key].AudioIndex != nil {
@@ -372,15 +394,26 @@ func Convert(fileName string) (err error) {
 			tmpAudio.Close()
 
 			// combine video + audio using ffmpeg(+mp42ts)
-			z.FFInputCombFromFile(tmpVideoName, tmpAudioName)
+			zm.FFInputCombFromFile(tmpVideoName, tmpAudioName)
 			os.Remove(tmpVideoName)
 			os.Remove(tmpAudioName)
+		} else {
+			if (chunks[key].VideoIndex == nil && chunks[key].AudioIndex != nil) ||
+				(chunks[key].VideoIndex != nil && chunks[key].AudioIndex == nil) {
+					fmt.Printf("\nIncomplete sequence. skipped: %d\n", key)
+					if zm != nil {
+						zm.CloseFFInput()
+						zm.Wait()
+					}
+					zm = &ZipMp4{ZipName: fileName}
+					zm.OpenFFMpeg()
+			}
 		}
 	}
 
-	z.CloseFFInput()
-	z.Wait()
-	fmt.Printf("\nfinish: %s\n", z.Mp4NameOpened)
+	zm.CloseFFInput()
+	zm.Wait()
+	fmt.Printf("\nfinish: %s\n", zm.Mp4NameOpened)
 
 	return
 }

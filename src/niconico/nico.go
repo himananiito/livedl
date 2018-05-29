@@ -15,6 +15,8 @@ import (
 	"net"
 	"encoding/xml"
 	"bufio"
+	"os/signal"
+	"syscall"
 )
 
 func NicoLogin(id, pass string, opt options.Option) (err error) {
@@ -56,19 +58,6 @@ func NicoLogin(id, pass string, opt options.Option) (err error) {
 }
 
 func Record(opt options.Option) (err error) {
-	setData := map[string]string{}
-	if opt.NicoLoginId != "" || opt.NicoLoginPass != "" {
-		setData["NicoLoginId"] = opt.NicoLoginId
-		setData["NicoLoginPass"] = opt.NicoLoginPass
-	}
-	if opt.NicoSession != "" {
-		setData["NicoSession"] = opt.NicoSession
-	}
-	if len(setData) > 0 {
-		if err = cryptoconf.Set(setData, opt.ConfFile, opt.ConfPass); err != nil {
-			return
-		}
-	}
 
 	for i := 0; i < 2; i++ {
 		// load session info
@@ -121,6 +110,14 @@ func Record(opt options.Option) (err error) {
 }
 
 func TestRun(opt options.Option) (err error) {
+	if false {
+		ch := make(chan os.Signal, 10)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+		go func() {
+			<-ch
+			os.Exit(0)
+		}()
+	}
 
 	opt.NicoRtmpIndex = map[int]bool{
 		0: true,

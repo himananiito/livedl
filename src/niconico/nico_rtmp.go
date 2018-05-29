@@ -327,7 +327,8 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 		rtmp.SetFlvName(fileName)
 
 		// default: 2500000
-		if err = rtmp.SetPeerBandwidth(100*1000*1000, 0); err != nil {
+		//if err = rtmp.SetPeerBandwidth(100*1000*1000, 0); err != nil {
+		if err = rtmp.SetPeerBandwidth(2500000, 0); err != nil {
 			fmt.Printf("SetPeerBandwidth: %v\n", err)
 			return
 		}
@@ -466,8 +467,11 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 			fmt.Printf("Play: %v\n", err)
 			return
 		}
-		// Non-recordedな過去録でseekしても、timestampが変わるだけで
+
+		// Non-recordedなタイムシフトでseekしても、timestampが変わるだけで
 		// 最初からの再生となってしまうのでやらないこと
+
+		// 公式のタイムシフトでSeekしてもタイムスタンプがおかしい
 
 		if opt.NicoTestTimeout > 0 {
 			// test mode
@@ -480,7 +484,7 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 	} // end func
 
 	ticketTime := time.Now().Unix()
-
+	//rtmp.SetNoSeek(false)
 	for i := 0; i < 10; i++ {
 		incomplete, e := tryRecord()
 		if e != nil {
@@ -489,15 +493,18 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 			return
 		} else if incomplete && status.isOfficialTs() {
 			fmt.Println("incomplete")
+			time.Sleep(5 * time.Second)
 
 			// update ticket
-			if time.Now().Unix() > ticketTime + 60 {
-				ticketTime = time.Now().Unix()
-				if ticket, e := getTicket(opt); e != nil {
-					err = e
-					return
-				} else {
-					rtmp.SetConnectOpt(ticket)
+			if false {
+				if time.Now().Unix() > ticketTime + 60 {
+					ticketTime = time.Now().Unix()
+					if ticket, e := getTicket(opt); e != nil {
+						err = e
+						return
+					} else {
+						rtmp.SetConnectOpt(ticket)
+					}
 				}
 			}
 
