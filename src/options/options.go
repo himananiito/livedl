@@ -23,6 +23,7 @@ type Option struct {
 	NicoRtmpOnly bool
 	NicoRtmpIndex map[int]bool
 	NicoHlsOnly bool
+	NicoLoginOnly bool
 	NicoTestTimeout int
 	TcasId string
 	YoutubeId string
@@ -60,6 +61,7 @@ COMMAND:
 オプション/option (ニコニコ生放送/nicolive):
   -nico-login <id>,<password>    ニコニコのIDとパスワードを設定し設定ファイルに書き込む
   -nico-session <session>        Cookie[user_session]を設定し設定ファイルに書き込む
+  -nico-login-only               非ログインで視聴可能の番組でも必ずログイン状態で録画する
   -nico-hls-only                 録画時にHLSのみを試す
   -nico-rtmp-only                録画時にRTMPのみを試す
   -nico-rtmp-max-conn <num>      RTMPの同時接続数を設定
@@ -176,6 +178,10 @@ func ParseArgs() (opt Option) {
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?(?:z|zip)-?(?:2|to)-?(?:m|mp4)\z`), func() error {
 			opt.Command = "ZIP2MP4"
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?login-?only\z`), func() error {
+			opt.NicoLoginOnly = true
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?hls-?only\z`), func() error {

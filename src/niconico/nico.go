@@ -194,6 +194,7 @@ func TestRun(opt options.Option) (err error) {
 					err = e
 					return
 				}
+				//fmt.Println(s)
 				if ma := regexp.MustCompile(`>(\d+),\S+,\S+<`).FindStringSubmatch(s); len(ma) > 0 {
 					L0:for {
 						select {

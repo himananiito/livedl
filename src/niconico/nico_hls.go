@@ -26,6 +26,8 @@ import (
 	"syscall"
 	"log"
 	"runtime"
+	"bytes"
+	"../log4gui"
 )
 
 type OBJ = map[string]interface{}
@@ -44,8 +46,10 @@ type NicoMedia struct {
 	nextTime time.Time
 	format string
 	ht2_nicolive string
+	ht2_format string
 	containList map[uint64]struct{}
 	mtx sync.Mutex
+	seqNoMin int64
 }
 type comment struct {
 	messageServerUri string
@@ -77,6 +81,7 @@ type NicoHls struct {
 
 	mtxRestart sync.Mutex
 	restartMain bool
+	quality string
 }
 func NewHls(broadcastId, webSocketUrl, userId string) (hls *NicoHls, err error) {
 
@@ -88,6 +93,8 @@ func NewHls(broadcastId, webSocketUrl, userId string) (hls *NicoHls, err error) 
 		wgPlaylist: &sync.WaitGroup{},
 		wgComment: &sync.WaitGroup{},
 		wgMaster: &sync.WaitGroup{},
+
+		quality: "abr",
 	}
 
 	return
@@ -168,6 +175,7 @@ func getPlaylist(uri *url.URL) (nextUri *url.URL, mediapl *m3u8.MediaPlaylist, i
 
 func (media *NicoMedia) clearHt2Nicolive() {
 	media.ht2_nicolive = ""
+	media.ht2_format = ""
 }
 func (media *NicoMedia) SetPlaylist(uri string) (is403 bool, err error) {
 	media.playlistUrl, err = url.Parse(uri)
@@ -314,7 +322,6 @@ func (media *NicoMedia) GetMedias() (is403 bool, err error) {
 		media.nextTime = time.Now().Add(time.Second)
 	}()
 
-
 	for _, seg := range mediapl.Segments {
 		if seg == nil {
 			break
@@ -332,9 +339,7 @@ func (media *NicoMedia) GetMedias() (is403 bool, err error) {
 
 		// media url is
 		// \d\.ts?ht2_nicolive=\d+\.\w+
-		ma := regexp.MustCompile(`/\d+\.ts\?ht2_nicolive=([\w\.]+)\z`).
-			FindStringSubmatch(mUri)
-		if len(ma) > 0 {
+		if ma := regexp.MustCompile(`/\d+\.ts\?ht2_nicolive=([\w\.]+)\z`).FindStringSubmatch(mUri); len(ma) > 0 {
 			if media.ht2_nicolive != "" {
 				if media.ht2_nicolive != ma[1] {
 					fmt.Println("[FIXME] ht2_nicolive changed")
@@ -342,13 +347,25 @@ func (media *NicoMedia) GetMedias() (is403 bool, err error) {
 			} else {
 				media.ht2_nicolive = ma[1]
 			}
+			media.ht2_format = "%d.ts?ht2_nicolive=%s"
+
+		} else if ma := regexp.MustCompile(`/([^/]*?)\d+\.ts(\?.*?)?\z`).FindStringSubmatch(mUri); len(ma) > 0 {
+			if media.ht2_nicolive != "" {
+				if media.ht2_nicolive != ma[2] {
+					fmt.Println("[FIXME] ht2_nicolive changed")
+				}
+			} else {
+				media.ht2_nicolive = ma[2]
+			}
+			media.ht2_format = ma[1] + "%d.ts%s"
+			///fmt.Println(media.ht2_format)
 		} else {
 			fmt.Printf("[FIXME] ht2_nicolive Not found: %s\n", mUri)
 		}
 	}
 
 	getNicoTsChunk := func(num uint64) (is403, is404 bool, err error) {
-		s := fmt.Sprintf("%d.ts?ht2_nicolive=%s", num, media.ht2_nicolive)
+		s := fmt.Sprintf(media.ht2_format, num, media.ht2_nicolive)
 		u, e := url.Parse(s)
 		if e != nil {
 			err = e
@@ -356,15 +373,16 @@ func (media *NicoMedia) GetMedias() (is403 bool, err error) {
 		}
 
 		mUri := media.playlistUrl.ResolveReference(u).String()
-		//fmt.Println(mUri)
 
+		//fmt.Println(mUri)
 		return media.GetMedia1(Seq{
 			no: num,
 			url: mUri,
 		})
 	}
 
-	for i := int64(mediapl.SeqNo) - 1; (i >= 0) && (i > int64(mediapl.SeqNo) - 10); i-- {
+	//for i := int64(mediapl.SeqNo) - 1; (i >= 0) && (i > int64(mediapl.SeqNo) - 10); i-- {
+	for i := int64(mediapl.SeqNo) - 1; i >= media.seqNoMin; i-- {
 		var is404 bool
 		is403, is404, err = getNicoTsChunk(uint64(i))
 		if err != nil {
@@ -376,7 +394,11 @@ func (media *NicoMedia) GetMedias() (is403 bool, err error) {
 			return
 		}
 		if is404 {
-			log.Printf("404: SeqNo=%d\n", i)
+			if media.seqNoMin == 0 {
+				media.seqNoMin = i + 1
+			} else {
+				log.Printf("404: SeqNo=%d\n", i)
+			}
 			break
 		}
 	}
@@ -510,6 +532,7 @@ const (
 	INTERRUPT
 	MAIN_WS_ERROR
 	MAIN_DISCONNECT
+	MAIN_INVALID_STREAM_QUALITY
 	PLAYLIST_403
 	PLAYLIST_ERROR
 	DELAY
@@ -608,6 +631,16 @@ func (hls *NicoHls) checkReturnCode(code int) {
 		hls.markRestartMain()
 		hls.stopPGoroutines()
 
+	case MAIN_WS_ERROR:
+		hls.stopPGoroutines()
+
+	case MAIN_DISCONNECT:
+		hls.stopPCGoroutines()
+
+	case MAIN_INVALID_STREAM_QUALITY:
+		hls.markRestartMain()
+		hls.stopPGoroutines()
+
 	case PLAYLIST_ERROR:
 		hls.stopPCGoroutines()
 
@@ -618,9 +651,6 @@ func (hls *NicoHls) checkReturnCode(code int) {
 	case COMMENT_SAVE_ERROR:
 		//log.Println("comment save error")
 		hls.stopCGoroutines()
-
-	case MAIN_DISCONNECT:
-		hls.stopPCGoroutines()
 
 	case INTERRUPT:
 		hls.startInterrupt()
@@ -679,11 +709,15 @@ func (hls *NicoHls) startGoroutine2(start_t int, f func(chan struct{}) int) {
 }
 // Of playlist
 func (hls *NicoHls) startPGoroutine(f func(chan struct{}) int) {
-	hls.startGoroutine2(START_PLAYLIST, f)
+	if hls.nInterrupt == 0 {
+		hls.startGoroutine2(START_PLAYLIST, f)
+	}
 }
 // Of comment
 func (hls *NicoHls) startCGoroutine(f func(chan struct{}) int) {
-	hls.startGoroutine2(START_COMMENT, f)
+	if hls.nInterrupt == 0 {
+		hls.startGoroutine2(START_COMMENT, f)
+	}
 }
 func (hls *NicoHls) startMGoroutine(f func(chan struct{}) int) {
 	hls.startGoroutine2(START_MASTER, f)
@@ -764,7 +798,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 			})
 
 			hls.startCGoroutine(func(sig chan struct{}) int {
-				for {
+				for hls.nInterrupt == 0 {
 					select {
 						case <-time.After(60 * time.Second):
 							if conn != nil {
@@ -781,6 +815,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 							return GOT_SIGNAL
 					}
 				}
+				return OK
 			})
 
 			err = conn.WriteJSON([]OBJ{
@@ -806,7 +841,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 				return COMMENT_WS_ERROR
 			}
 
-			for {
+			for hls.nInterrupt == 0 {
 				select {
 				case <-sig:
 					return GOT_SIGNAL
@@ -833,6 +868,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 					}
 				}
 			}
+			return OK
 		})
 	}
 }
@@ -848,7 +884,7 @@ func (hls *NicoHls) startPlaylist(uri string) {
 			return PLAYLIST_ERROR
 		}
 
-		for {
+		for hls.nInterrupt == 0 {
 			var dur time.Duration
 			if (hls.media.nextTime.IsZero()) {
 				dur = 10 * time.Second
@@ -886,12 +922,13 @@ func (hls *NicoHls) startPlaylist(uri string) {
 				return GOT_SIGNAL
 			}
 		}
+		return OK
 	})
 }
 func (hls *NicoHls) startMain() {
 
 	hls.startPGoroutine(func(sig chan struct{}) int {
-
+		//fmt.Println(hls.webSocketUrl)
 		conn, _, err := websocket.DefaultDialer.Dial(
 			hls.webSocketUrl,
 			map[string][]string{},
@@ -936,7 +973,7 @@ func (hls *NicoHls) startMain() {
 					"route": "",
 					"stream": OBJ{
 						"isLowLatency": false,
-						"priorStreamQuality": "abr",
+						"priorStreamQuality": hls.quality, //"abr", // high
 						"protocol": "hls",
 						"requireNewStream": true,
 					},
@@ -953,7 +990,7 @@ func (hls *NicoHls) startMain() {
 		var playlistStarted bool
 		var watchingStarted bool
 		var watchinginterval int
-		for {
+		for hls.nInterrupt == 0 {
 			select {
 			case <-sig:
 				return GOT_SIGNAL
@@ -968,7 +1005,7 @@ func (hls *NicoHls) startMain() {
 				return MAIN_WS_ERROR
 			}
 
-			///fmt.Printf("ReadJSON => %v\n", res)
+			//fmt.Printf("ReadJSON => %v\n", res)
 			_type, ok := obj.FindString(res, "type")
 			if (! ok) {
 				fmt.Printf("type not found\n")
@@ -1072,8 +1109,30 @@ func (hls *NicoHls) startMain() {
 					}
 					return MAIN_WS_ERROR
 				}
+			case "error":
+				code, ok := obj.FindString(res, "body", "code")
+				if (! ok) {
+					log.Fatalf("Unknown error: %#v\n", res)
+				}
+				switch code {
+				case "INVALID_STREAM_QUALITY":
+					// webSocket自体を再接続しないと、コメントサーバが取得できない
+					switch hls.quality {
+					case "abr":
+						hls.quality = "high"
+						return MAIN_INVALID_STREAM_QUALITY
+					default:
+						return OK
+					}
+
+				default:
+					log.Fatalf("Unknown error: %s\n%#v\n", code, res)
+				}
+			default:
+				log.Printf("Unknown type: %s\n%#v\n", _type, res)
 			} // end switch "type"
 		} // for ReadJSON
+		return OK
 	})
 }
 
@@ -1101,6 +1160,7 @@ func (hls *NicoHls) Wait(testTimeout int) {
 		if hls.waitRestartMain() {
 			continue
 		}
+		hls.stopPCGoroutines()
 		hls.waitCGoroutines()
 	}
 
@@ -1114,13 +1174,123 @@ func (hls *NicoHls) Wait(testTimeout int) {
 	return
 }
 
+func getActionTrackId() (err error) {
+	uri := "https://public.api.nicovideo.jp/v1/action-track-ids.json"
+	req, _ := http.NewRequest("POST", uri, nil)
+	//if opt.NicoSession != "" {
+	//	req.Header.Set("Cookie", "user_session=" + opt.NicoSession)
+	//}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := new(http.Client)
+	resp, e := client.Do(req)
+	if e != nil {
+		err = e
+		return
+	}
+	defer resp.Body.Close()
+	bs, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Println(err)
+	}
+	fmt.Printf("%s\n", bs)
+	return
+}
+
+func __watching0(opt options.Option) (err error) {
+	uri := fmt.Sprintf("https://api.cas.nicovideo.jp/v1/services/live/programs/%s/watching", opt.NicoLiveId)
+	req, _ := http.NewRequest("OPTIONS", uri, nil)
+
+	//if opt.NicoSession != "" {
+		req.Header.Set("Cookie", "user_session=" + opt.NicoSession)
+	//}
+
+	req.Header.Set("X-Frontend-Id", "91")
+	req.Header.Set("Access-Control-Request-Headers", "content-type,x-connection-environment,x-frontend-id")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Origin", "https://cas.nicovideo.jp")
+
+	client := new(http.Client)
+	resp, e := client.Do(req)
+	if e != nil {
+		err = e
+		return
+	}
+	defer resp.Body.Close()
+	bs, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Println(err)
+	}
+	fmt.Printf("%#v\n", resp.Header)
+	fmt.Printf("%s\n", bs)
+	return
+}
+
+
+func __watching10(opt options.Option, actionTrackId string) (err error) {
+
+	str, _ := json.Marshal(OBJ{
+		"actionTrackId": actionTrackId,
+		"isBroadcaster": false,
+		"isLowLatencyStream": true,
+		"streamCapacity": "superhigh",
+		"streamProtocol": "https",
+		"streamQuality": "auto",
+	})
+	if err != nil {
+		log.Fatalln(err)
+	}
+	fmt.Printf("\n%s\n\n", str)
+
+	data := bytes.NewReader(str)
+
+	uri := fmt.Sprintf("https://api.cas.nicovideo.jp/v1/services/live/programs/%s/watching", opt.NicoLiveId)
+	req, _ := http.NewRequest("POST", uri, data)
+
+	//if opt.NicoSession != "" {
+		req.Header.Set("Cookie", "user_session=" + opt.NicoSession)
+	//}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://cas.nicovideo.jp")
+	//req.Header.Set("Referer", "https://cas.nicovideo.jp/user/*/*")
+	req.Header.Set("X-Connection-Environment", "ethernet")
+	req.Header.Set("X-Frontend-Id", "91")
+
+	client := new(http.Client)
+	resp, e := client.Do(req)
+	if e != nil {
+		err = e
+		return
+	}
+	defer resp.Body.Close()
+	bs, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Println(err)
+	}
+	fmt.Printf("%#v\n", resp.Header)
+	//fmt.Printf("%s\n", bs)
+	var props interface{}
+	if err = json.Unmarshal([]byte(bs), &props); err != nil {
+		return
+	}
+
+	obj.PrintAsJson(props)
+	return
+}
+
+
+
+
+
 func getProps(opt options.Option) (props interface{}, notLogin bool, err error) {
 	formats := []string{
 		"http://live2.nicovideo.jp/watch/%s",
-	//	"http://live.nicovideo.jp/watch/%s",
+		"http://live.nicovideo.jp/watch/%s",
 	}
 
-	for _, format := range formats {
+	for i, format := range formats {
 		url := fmt.Sprintf(format, opt.NicoLiveId)
 		req, _ := http.NewRequest("GET", url, nil)
 		if opt.NicoSession != "" {
@@ -1129,10 +1299,19 @@ func getProps(opt options.Option) (props interface{}, notLogin bool, err error) 
 
 		client := new(http.Client)
 		var redirect bool
+		var skip bool
 		client.CheckRedirect = func(req *http.Request, via []*http.Request) (err error) {
-			//fmt.Printf("redirect to %v\n", req.URL.String())
+			fmt.Printf("redirect to %v\n", req.URL.String())
 			// リダイレクトが走ったらHLSでは不可とみなす
-			redirect = true
+			// -->
+			// cas.nicovideoかもしれない
+			if regexp.MustCompile(`\Ahttps?://cas\.nicovideo\.jp/user/.*`).MatchString(req.URL.String()) {
+				redirect = false
+			} else if i == 0 && regexp.MustCompile(`\Ahttps?://live\.nicovideo\.jp/gate/.*`).MatchString(req.URL.String()) {
+				skip = true
+			} else {
+				redirect = true
+			}
 			return nil
 		}
 		resp, e := client.Do(req)
@@ -1140,13 +1319,18 @@ func getProps(opt options.Option) (props interface{}, notLogin bool, err error) 
 			err = e
 			return
 		}
+		if skip {
+			resp.Body.Close()
+			continue
+		}
 		defer resp.Body.Close()
+
+		dat, _ := ioutil.ReadAll(resp.Body)
 
 		if redirect {
 			return
 		}
 
-		dat, _ := ioutil.ReadAll(resp.Body)
 
 		if ma := regexp.MustCompile(`data-props="(.+?)"`).FindSubmatch(dat); len(ma) > 0 {
 			str := html.UnescapeString(string(ma[1]))
@@ -1171,6 +1355,9 @@ func getProps(opt options.Option) (props interface{}, notLogin bool, err error) 
 
 func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 
+//getActionTrackId()
+
+
 	props, __notLogin, err := getProps(opt)
 	if err != nil {
 		//fmt.Println(err)
@@ -1194,6 +1381,35 @@ func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 		fmt.Printf("broadcastId not found\n")
 		return
 	}
+
+	user_id, ok := obj.FindString(props, "user", "id")
+	if ! ok {
+		fmt.Printf("user_id not found\n")
+		//return
+	}
+	isLoggedIn, ok := obj.FindBool(props, "user", "isLoggedIn")
+	if ! ok {
+		fmt.Printf("isLoggedIn not found\n")
+	}
+	nickname, ok := obj.FindString(props, "user", "nickname")
+	if ! ok {
+		fmt.Printf("nickname not found\n")
+	}
+	log4gui.Info(fmt.Sprintf("isLoggedIn: %v, user_id: %s, nickname: %s", isLoggedIn, user_id, nickname))
+
+	if opt.NicoLoginOnly {
+		if isLoggedIn && user_id != "" {
+			// login OK
+		} else {
+			notLogin = true
+			return
+		}
+	}
+
+	if user_id == "" {
+		user_id = "NaN"
+	}
+
 
 	nicoliveProgramId, ok := obj.FindString(props, "program", "nicoliveProgramId")
 	if ! ok {
@@ -1222,12 +1438,6 @@ func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 	webSocketUrl, ok := obj.FindString(props, "site", "relive", "webSocketUrl")
 	if ! ok {
 		fmt.Printf("webSocketUrl not found")
-		return
-	}
-
-	user_id, ok := obj.FindString(props, "user", "id")
-	if ! ok {
-		fmt.Printf("user_id not found\n")
 		return
 	}
 

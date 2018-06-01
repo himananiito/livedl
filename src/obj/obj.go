@@ -55,6 +55,14 @@ func FindString(intf interface{}, keylist... string) (res string, ok bool) {
 	res, ok = val.(string)
 	return
 }
+func FindBool(intf interface{}, keylist... string) (res bool, ok bool) {
+	val, ok := FindVal(intf, keylist...)
+	if !ok {
+		return
+	}
+	res, ok = val.(bool)
+	return
+}
 func FindArray(intf interface{}, keylist... string) (res []interface{}, ok bool) {
 	val, ok := FindVal(intf, keylist...)
 	if !ok {

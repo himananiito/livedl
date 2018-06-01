@@ -7,7 +7,7 @@ import (
 
 func print(k, v string) {
 	bs, e := json.Marshal(map[string]string{
-		"Error": v,
+		k: v,
 	})
 	if(e != nil) {
 		fmt.Println(e)

@@ -603,7 +603,7 @@ func getStatus(opt options.Option) (status *Status, notLogin bool, err error) {
 	status = &Status{}
 	err = xml.Unmarshal(dat, status)
 	if err != nil {
-		fmt.Println(string(dat))
+		//fmt.Println(string(dat))
 		fmt.Printf("error: %v", err)
 		return
 	}
