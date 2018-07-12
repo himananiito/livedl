@@ -17,6 +17,8 @@ import (
 	"bufio"
 	"os/signal"
 	"syscall"
+	"runtime"
+	_ "net/http/pprof"
 )
 
 func NicoLogin(id, pass string, opt options.Option) (err error) {
@@ -110,6 +112,12 @@ func Record(opt options.Option) (err error) {
 }
 
 func TestRun(opt options.Option) (err error) {
+
+	go func() {
+		fmt.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+
+
 	if false {
 		ch := make(chan os.Signal, 10)
 		signal.Notify(ch, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
@@ -250,6 +258,8 @@ func TestRun(opt options.Option) (err error) {
 		opt.NicoLiveId = fmt.Sprintf("lv%s", nextId())
 
 		fmt.Fprintf(os.Stderr, "start test: %s\n", opt.NicoLiveId)
+		fmt.Fprintf(os.Stderr, "# NumGoroutine: %d\n", runtime.NumGoroutine())
+
 		var msg string
 		err = Record(opt)
 		if err != nil {
@@ -276,6 +286,7 @@ func TestRun(opt options.Option) (err error) {
 		}
 
 		fmt.Fprintf(os.Stderr, "%s: %s\n---------\n", opt.NicoLiveId, msg)
+
 		endCount++
 		if endCount > 100 {
 			break

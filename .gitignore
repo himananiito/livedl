@@ -7,6 +7,8 @@
 *~
 
 *.exe
+*.dll
+*.exe.config
 
 *.xml
 *.m3u8
@@ -15,4 +17,8 @@
 *.zip
 *.txt
 *.conf
+
+*.db
+*.sqlite
+*.sqlite3
 

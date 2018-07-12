@@ -14,6 +14,10 @@ import (
 	"path/filepath"
 	"../files"
 	"../log4gui"
+
+	"database/sql"
+	_ "github.com/mattn/go-sqlite3"
+	"bytes"
 )
 
 type ZipMp4 struct {
@@ -409,6 +413,66 @@ func Convert(fileName string) (err error) {
 					zm.OpenFFMpeg()
 			}
 		}
+	}
+
+	zm.CloseFFInput()
+	zm.Wait()
+	fmt.Printf("\nfinish: %s\n", zm.Mp4NameOpened)
+
+	return
+}
+
+
+func ConvertDB(fileName string) (err error) {
+	db, err := sql.Open("sqlite3", os.Args[1])
+	if err != nil {
+		return
+	}
+	defer db.Close()
+
+	var zm *ZipMp4
+	defer func() {
+		if zm != nil {
+			zm.CloseFFInput()
+			zm.Wait()
+		}
+	}()
+
+	zm = &ZipMp4{ZipName: fileName}
+	zm.OpenFFMpeg()
+
+	rows, err := db.Query("select seqno, size, data from media where data is not null order by seqno")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	prevIndex := int64(-1)
+	for rows.Next() {
+
+		var seqno int64
+		var size int
+		var data []byte
+		err = rows.Scan(&seqno, &size, &data)
+		if err != nil {
+			return
+		}
+
+		if prevIndex >= 0 {
+			if seqno != prevIndex + 1 {
+
+				fmt.Printf("\nSeqNo. skipped: %d --> %d\n", prevIndex, seqno)
+				if zm != nil {
+					zm.CloseFFInput()
+					zm.Wait()
+				}
+				zm = &ZipMp4{ZipName: fileName}
+				zm.OpenFFMpeg()
+			}
+		}
+		prevIndex = seqno
+
+		zm.FFInput(bytes.NewBuffer(data))
 	}
 
 	zm.CloseFFInput()

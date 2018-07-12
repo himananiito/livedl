@@ -64,6 +64,7 @@ type Rtmp struct {
 
 	VideoExists bool
 	noSeek bool
+	flush bool
 }
 
 func NewRtmp(tc, swf, page string, opt... interface{})(rtmp *Rtmp, err error) {
@@ -110,6 +111,9 @@ func (rtmp *Rtmp) Connect() (err error) {
 		rtmp.connectOpt...,
 	)
 	return
+}
+func (rtmp *Rtmp) SetFlush(b bool) {
+	rtmp.flush = b
 }
 func (rtmp *Rtmp) SetNoSeek(b bool) {
 	rtmp.noSeek = b
@@ -720,7 +724,7 @@ func (rtmp *Rtmp) PlayTime(stream string, timestamp int) (err error) {
 
 	data = append(data, timestamp) // Start
 	// NicoOfficialTs, Never append Duration and flush
-	if false {
+	if rtmp.flush {
 		data = append(data, -1) // Duration
 		data = append(data, true) // flush
 	}

@@ -458,6 +458,7 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 			}
 
 		} else if status.isTs() {
+			rtmp.SetFlush(true)
 			err = rtmp.PlayTime(streamName, -5000)
 
 		} else {

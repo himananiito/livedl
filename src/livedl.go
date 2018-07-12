@@ -66,6 +66,12 @@ func main() {
 			os.Exit(1)
 		}
 
+	case "DB2MP4":
+		if err := zip2mp4.ConvertDB(opt.DBFile); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
 	}
 
 
