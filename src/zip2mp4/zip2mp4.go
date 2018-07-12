@@ -424,7 +424,7 @@ func Convert(fileName string) (err error) {
 
 
 func ConvertDB(fileName string) (err error) {
-	db, err := sql.Open("sqlite3", os.Args[1])
+	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
 		return
 	}
