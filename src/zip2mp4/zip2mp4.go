@@ -18,6 +18,7 @@ import (
 	"database/sql"
 	_ "github.com/mattn/go-sqlite3"
 	"bytes"
+	"../niconico"
 )
 
 type ZipMp4 struct {
@@ -155,8 +156,7 @@ func (z *ZipMp4) CloseFFInput() {
 	z.FFStdin.Close()
 }
 func (z *ZipMp4) OpenFFMpeg() {
-	name := regexp.MustCompile(`(?i)\.zip\z`).ReplaceAllString(z.ZipName, "")
-	name = fmt.Sprintf("%s.mp4", name)
+	name := files.ChangeExtention(z.ZipName, "mp4")
 	dir := filepath.Dir(name)
 	base := filepath.Base(name)
 	base, err := files.GetFileNameNext(base)
@@ -430,6 +430,8 @@ func ConvertDB(fileName string) (err error) {
 	}
 	defer db.Close()
 
+	niconico.WriteComment(db, fileName)
+
 	var zm *ZipMp4
 	defer func() {
 		if zm != nil {
@@ -441,7 +443,7 @@ func ConvertDB(fileName string) (err error) {
 	zm = &ZipMp4{ZipName: fileName}
 	zm.OpenFFMpeg()
 
-	rows, err := db.Query("select seqno, size, data from media where data is not null order by seqno")
+	rows, err := db.Query(niconico.SelMedia)
 	if err != nil {
 		return
 	}

@@ -6,7 +6,32 @@ import (
 	"os"
 	"log"
 	"strings"
+	"database/sql"
+
+	"path/filepath"
+	"../files"
 )
+
+var SelMedia = `SELECT
+	seqno, size, data FROM media
+	WHERE data IS NOT NULL ORDER BY seqno`
+
+var SelComment = `SELECT
+	vpos,
+	date,
+	date_usec,
+	IFNULL(no, -1) AS no,
+	IFNULL(anonymity, 0) AS anonymity,
+	user_id,
+	content,
+	IFNULL(mail, "") AS mail,
+	IFNULL(premium, 0) AS premium,
+	IFNULL(score, 0) AS score,
+	thread,
+	IFNULL(origin, "") AS origin,
+	IFNULL(locale, "") AS locale
+	FROM comment
+	ORDER BY date2`
 
 func (hls *NicoHls) dbCreate() (err error) {
 	hls.dbMtx.Lock()
@@ -222,4 +247,138 @@ func (hls *NicoHls) dbInsert(table string, data map[string]interface{}) {
 	)
 
 	hls.dbExec(query, args...)
+}
+
+func (hls *NicoHls) dbGetFromWhen() (res_from int, when float64) {
+	hls.dbMtx.Lock()
+	defer hls.dbMtx.Unlock()
+	var date2 int64
+	var no int
+
+
+	hls.db.QueryRow("SELECT date2, no FROM comment ORDER BY date2 ASC LIMIT 1").Scan(&date2, &no)
+	res_from = no
+	if res_from <= 0 {
+		res_from = 1
+	}
+
+	if date2 == 0 {
+		var endTime float64
+		hls.db.QueryRow(`SELECT v FROM kvs WHERE k = "endTime"`).Scan(&endTime)
+
+		when = endTime
+	} else {
+		when = float64(date2) / (1000 * 1000)
+	}
+
+	return
+}
+
+func WriteComment(db *sql.DB, fileName string) {
+
+	rows, err := db.Query(SelComment)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer rows.Close()
+
+	fileName = files.ChangeExtention(fileName, "xml")
+
+	dir := filepath.Dir(fileName)
+	base := filepath.Base(fileName)
+	base, err = files.GetFileNameNext(base)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	fileName = filepath.Join(dir, base)
+	f, err := os.Create(fileName)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer f.Close()
+	fmt.Fprintln(f, `<?xml version="1.0" encoding="UTF-8"?>`)
+	fmt.Fprintln(f, `<packet>`)
+
+	for rows.Next() {
+		var vpos      int64
+		var date      int64
+		var date_usec int64
+		var no        int64
+		var anonymity int64
+		var user_id   string
+		var content   string
+		var mail      string
+		var premium   int64
+		var score     int64
+		var thread    int64
+		var origin    string
+		var locale    string
+		err = rows.Scan(
+			&vpos      ,
+			&date      ,
+			&date_usec ,
+			&no        ,
+			&anonymity ,
+			&user_id   ,
+			&content   ,
+			&mail      ,
+			&premium   ,
+			&score     ,
+			&thread    ,
+			&origin    ,
+			&locale    ,
+		)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		line := fmt.Sprintf(
+			`<chat thread="%d" vpos="%d" date="%d" date_usec="%d" user_id="%s"`,
+			thread,
+			vpos,
+			date,
+			date_usec,
+			user_id,
+		)
+
+		if no >= 0 {
+			line += fmt.Sprintf(` no="%d"`, no)
+		}
+		if anonymity != 0 {
+			line += fmt.Sprintf(` anonymity="%d"`, anonymity)
+		}
+		if mail != "" {
+			mail = strings.Replace(mail, `"`, "&quot;", -1)
+			mail = strings.Replace(mail, "&", "&amp;", -1)
+			mail = strings.Replace(mail, "<", "&lt;", -1)
+			line += fmt.Sprintf(` mail="%s"`, mail)
+		}
+		if origin != "" {
+			origin = strings.Replace(origin, `"`, "&quot;", -1)
+			origin = strings.Replace(origin, "&", "&amp;", -1)
+			origin = strings.Replace(origin, "<", "&lt;", -1)
+			line += fmt.Sprintf(` origin="%s"`, origin)
+		}
+		if premium != 0 {
+			line += fmt.Sprintf(` premium="%d"`, premium)
+		}
+		if score != 0 {
+			line += fmt.Sprintf(` score="%d"`, score)
+		}
+		if locale != "" {
+			locale = strings.Replace(locale, `"`, "&quot;", -1)
+			locale = strings.Replace(locale, "&", "&amp;", -1)
+			locale = strings.Replace(locale, "<", "&lt;", -1)
+			line += fmt.Sprintf(` locale="%s"`, locale)
+		}
+		line += ">"
+		content = strings.Replace(content, "&", "&amp;", -1)
+		content = strings.Replace(content, "<", "&lt;", -1)
+		line += content
+		line += "</chat>"
+		fmt.Fprintln(f, line)
+	}
+	fmt.Fprintln(f, `</packet>`)
 }

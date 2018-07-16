@@ -84,8 +84,11 @@ type NicoHls struct {
 	timeshiftStart float64
 
 	finish bool
+	commentDone bool
+
+	NicoSession string
 }
-func NewHls(opt map[string]interface{}, format string) (hls *NicoHls, err error) {
+func NewHls(NicoSession string, opt map[string]interface{}, format string) (hls *NicoHls, err error) {
 
 	broadcastId, ok := opt["broadcastId"].(string)
 	if !ok {
@@ -183,6 +186,9 @@ func NewHls(opt map[string]interface{}, format string) (hls *NicoHls, err error)
 	dbName = strings.Replace(dbName, "${CNAME}", files.ReplaceForbidden(cname), -1)
 	dbName = strings.Replace(dbName, "${CID}", files.ReplaceForbidden(cid), -1)
 	dbName = strings.Replace(dbName, "${TITLE}", files.ReplaceForbidden(title), -1)
+	if timeshift {
+		dbName = dbName + "(TS)"
+	}
 	dbName = dbName + ".sqlite3"
 
 	hls = &NicoHls{
@@ -198,6 +204,8 @@ func NewHls(opt map[string]interface{}, format string) (hls *NicoHls, err error)
 		dbName: dbName,
 
 		isTimeshift: timeshift,
+
+		NicoSession: NicoSession,
 	}
 
 	for i := 0; i < 2 ; i++ {
@@ -244,14 +252,26 @@ func (hls *NicoHls) commentHandler(tag string, attr interface{}) (err error) {
 		err = fmt.Errorf("[FIXME] commentHandler: not a map: %#v", attr)
 		return
 	}
-
+	//fmt.Printf("%#v\n", attrMap)
 	if vpos_f, ok := attrMap["vpos"].(float64); ok {
 		vpos := int(vpos_f)
-		date := int(attrMap["date"].(float64))
-		date_usec := int(attrMap["date_usec"].(float64))
+		var date int
+		if d, ok := attrMap["date"].(float64); ok {
+			date = int(d)
+		}
+		var date_usec int
+		if d, ok := attrMap["date_usec"].(float64); ok {
+			date_usec = int(d)
+		}
 		date2 := (date * 1000 * 1000) + date_usec
-		user_id := attrMap["user_id"].(string)
-		content := attrMap["content"].(string)
+		var user_id string
+		if s, ok := attrMap["user_id"].(string); ok {
+			user_id = s
+		}
+		var content string
+		if s, ok := attrMap["content"].(string); ok {
+			content = s
+		}
 		calc_s := fmt.Sprintf("%d,%d,%d,%s,%s", vpos, date, date_usec, user_id, content)
 		hash := fmt.Sprintf("%x", sha3.Sum256([]byte(calc_s)))
 
@@ -336,6 +356,7 @@ const (
 	DELAY
 	COMMENT_WS_ERROR
 	COMMENT_SAVE_ERROR
+	COMMENT_DONE
 	GOT_SIGNAL
 	ERROR_SHUTDOWN
 	NETWORK_ERROR
@@ -463,8 +484,17 @@ func (hls *NicoHls) checkReturnCode(code int) {
 		hls.stopPGoroutines()
 
 	case PLAYLIST_END:
+		fmt.Println("playlist end.")
 		hls.finish = true
-		hls.stopPCGoroutines()
+		if hls.isTimeshift {
+			if hls.commentDone {
+				hls.stopPCGoroutines()
+			} else {
+				fmt.Println("waiting comment")
+			}
+		} else {
+			hls.stopPCGoroutines()
+		}
 
 	case MAIN_WS_ERROR:
 		hls.stopPGoroutines()
@@ -493,6 +523,12 @@ func (hls *NicoHls) checkReturnCode(code int) {
 
 	case ERROR_SHUTDOWN:
 		hls.stopPCGoroutines()
+
+	case COMMENT_DONE:
+		hls.commentDone = true
+		if hls.finish {
+			hls.stopPCGoroutines()
+		}
 
 	case OK:
 	}
@@ -604,6 +640,35 @@ func (hls *NicoHls) waitAllGoroutines() {
 	hls.waitMGoroutines()
 }
 
+func (hls *NicoHls) getwaybackkey(threadId string) (waybackkey string, neterr, err error) {
+
+	uri := fmt.Sprintf("http://live.nicovideo.jp/api/getwaybackkey?thread=%s", threadId)
+	req, _ := http.NewRequest("GET", uri, nil)
+	req.Header.Set("Cookie", "user_session=" + hls.NicoSession)
+
+	client := new(http.Client)
+	resp, neterr := client.Do(req)
+	if neterr != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	dat, neterr := ioutil.ReadAll(resp.Body)
+	if neterr != nil {
+		return
+	}
+
+	waybackkey = strings.TrimPrefix(string(dat), "waybackkey=")
+	if waybackkey == "" {
+		err = fmt.Errorf("waybackkey not found")
+		return
+	}
+	return
+}
+func (hls *NicoHls) getTsCommentFromWhen() (res_from int, when float64) {
+	return hls.dbGetFromWhen()
+}
+
 func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 	if (! hls.commentStarted) {
 		hls.commentStarted = true
@@ -659,27 +724,111 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 				return OK
 			})
 
-			err = conn.WriteJSON([]OBJ{
-				OBJ{"ping": OBJ{"content": "rs:0"}},
-				OBJ{"ping": OBJ{"content": "ps:0"}},
-				OBJ{"thread": OBJ{
-					"fork": 0,
-					"nicoru": 0,
-					"res_from": -1000,
-					"scores": 1,
-					"thread": threadId,
-					"user_id": hls.myUserId,
-					"version": "20061206",
-					"with_global": 1,
-				}},
-				OBJ{"ping": OBJ{"content": "pf:0"}},
-				OBJ{"ping": OBJ{"content": "rf:0"}},
-			})
-			if err != nil {
-				if hls.nInterrupt == 0 {
-					log.Println("comment send first:", err)
+			var mtxChatTime sync.Mutex
+			var _chatCount int64
+			incChatCount := func() {
+				mtxChatTime.Lock()
+				defer mtxChatTime.Unlock()
+				_chatCount++
+			}
+			getChatCount := func() int64 {
+				mtxChatTime.Lock()
+				defer mtxChatTime.Unlock()
+				return _chatCount
+			}
+
+			if hls.isTimeshift {
+
+				hls.startCGoroutine(func(sig chan struct{}) int {
+					defer func() {
+						fmt.Println("Comment done.")
+					}()
+
+					var pre int64
+					var finishHint int
+					for hls.nInterrupt == 0 {
+						select {
+							case <-time.After(1 * time.Second):
+								c := getChatCount()
+								if c == 0 || c == pre {
+
+									waybackkey, neterr, err := hls.getwaybackkey(threadId)
+									if neterr != nil {
+										return NETWORK_ERROR
+									}
+									if err != nil {
+										log.Printf("getwaybackkey: %v\n", err)
+										return OK
+									}
+
+									_, when := hls.getTsCommentFromWhen()
+
+									//fmt.Printf("getTsCommentFromWhen %f %d\n", when, res_from)
+
+									err = conn.WriteJSON([]OBJ{
+										OBJ{"ping": OBJ{"content": "rs:1"}},
+										OBJ{"ping": OBJ{"content": "ps:5"}},
+										OBJ{"thread": OBJ{
+											"fork": 0,
+											"nicoru": 0,
+											"res_from": -1000,
+											"scores": 1,
+											"thread": threadId,
+											"user_id": hls.myUserId,
+											"version": "20061206",
+											"waybackkey": waybackkey,
+											"when": when + 1,
+											"with_global": 1,
+										}},
+										OBJ{"ping": OBJ{"content": "pf:5"}},
+										OBJ{"ping": OBJ{"content": "rf:1"}},
+									})
+									if err != nil {
+										return NETWORK_ERROR
+									}
+
+								} else if c < pre + 100 {
+									// 通常,1000カウント弱増えるが、少ししか増えない場合
+									finishHint++
+									if finishHint > 2 {
+										return COMMENT_DONE
+									}
+
+								} else {
+									finishHint = 0
+								}
+								pre = c
+
+							case <-sig:
+								return GOT_SIGNAL
+						}
+					}
+					return COMMENT_DONE
+				})
+
+			} else {
+				err = conn.WriteJSON([]OBJ{
+					OBJ{"ping": OBJ{"content": "rs:0"}},
+					OBJ{"ping": OBJ{"content": "ps:0"}},
+					OBJ{"thread": OBJ{
+						"fork": 0,
+						"nicoru": 0,
+						"res_from": -1000,
+						"scores": 1,
+						"thread": threadId,
+						"user_id": hls.myUserId,
+						"version": "20061206",
+						"with_global": 1,
+					}},
+					OBJ{"ping": OBJ{"content": "pf:0"}},
+					OBJ{"ping": OBJ{"content": "rf:0"}},
+				})
+				if err != nil {
+					if hls.nInterrupt == 0 {
+						log.Println("comment send first:", err)
+					}
+					return COMMENT_WS_ERROR
 				}
-				return COMMENT_WS_ERROR
 			}
 
 			for hls.nInterrupt == 0 {
@@ -692,10 +841,14 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 					if err = conn.ReadJSON(&res); err != nil {
 						return COMMENT_WS_ERROR
 					}
+
+					//fmt.Printf("debug %#v\n", res)
+
 					if data, ok := obj.FindVal(res, "chat"); ok {
 						if err := hls.commentHandler("chat", data); err != nil {
 							return COMMENT_SAVE_ERROR
 						}
+						incChatCount()
 
 					} else if data, ok := obj.FindVal(res, "thread"); ok {
 						if err := hls.commentHandler("thread", data); err != nil {
@@ -838,6 +991,31 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 	if len(ma) > 0 {
 
 		// Index m3u8
+
+		// #CURRENT-POSITION:0.0
+		// #DMC-CURRENT-POSITION:0.0
+		var currentPos float64
+		if ma := regexp.MustCompile(`#(?:DMC-)?CURRENT-POSITION:(\d+(?:\.\d+))?`).
+			FindStringSubmatch(m3u8); len(ma) > 0 {
+			if hls.isTimeshift {
+				n, err := strconv.ParseFloat(ma[1], 64)
+				if err != nil {
+					panic(err)
+				}
+				currentPos = n
+				hls.playlist.position = currentPos
+			} else {
+				// timeshiftじゃないのにCURRENT-POSITIONがあれば終了
+				isEnd = true
+				return
+			}
+
+		} else {
+			if hls.isTimeshift {
+				currentPos = hls.timeshiftStart
+			}
+		}
+
 		var seqStart int
 
 		seqStart, err = strconv.Atoi(ma[1])
@@ -849,6 +1027,11 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 
 		re := regexp.MustCompile(`#EXTINF:(\d+(?:\.\d+)?)[^\n]*\n(\S+)`)
 		ma := re.FindAllStringSubmatch(m3u8, -1)
+
+		if len(ma) == 0 {
+			hls.playlist.nextTime = time.Now().Add(time.Second)
+			return
+		}
 
 		type seq_t struct {
 			seqno int
@@ -901,6 +1084,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 					hls.playlist.format = f
 
 				} else if hls.playlist.format != f {
+					fmt.Println(m3u8)
 					fmt.Println("[FIXME] media format changed")
 					hls.playlist.withoutFormat = true
 				}
@@ -908,29 +1092,27 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 		}
 
 		if hls.isTimeshift {
-			var currentPos float64
-			if ma := regexp.MustCompile(`#(?:DMC-)?CURRENT-POSITION:(\d+(?:\.\d+))?`).
-				FindStringSubmatch(m3u8); len(ma) > 0 {
-				n, err := strconv.ParseFloat(ma[1], 64)
-				if err != nil {
-					panic(err)
-				}
-				currentPos = n
-				hls.playlist.position = currentPos
-			} else {
-				currentPos = hls.timeshiftStart
-			}
-
 			hls.timeshiftStart = currentPos + duration - 0.49
 		}
 
+		// prints Current SeqNo
 		if hls.isTimeshift {
-			fmt.Printf("Current SeqNo: %d, Pos: %fs\n", hls.playlist.seqNo, hls.playlist.position)
+			sec := int(hls.playlist.position)
+			var pos string
+			if sec >= 3600 {
+				pos += fmt.Sprintf("%dh", sec / 3600)
+				sec = sec % 3600
+			}
+			if sec > 60 {
+				pos += fmt.Sprintf("%02dm", sec / 60)
+				sec = sec % 60
+			}
+			pos += fmt.Sprintf("%02ds", sec)
+
+			fmt.Printf("Current SeqNo: %d, Pos: %s\n", hls.playlist.seqNo, pos)
 		} else {
 			fmt.Printf("Current SeqNo: %d\n", hls.playlist.seqNo)
 		}
-
-
 
 		if (! hls.isTimeshift) && (! hls.playlist.withoutFormat) {
 			// 404になるまで後ろに戻ってチャンクを取得する
@@ -1012,6 +1194,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 			if uri == nil {
 				panic("error")
 			}
+
 			hls.playlist.bandwidth = maxBw
 			if (! hls.isTimeshift) {
 				hls.playlist.uriMaster = argUri
@@ -1523,7 +1706,7 @@ func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 		}
 	}
 
-	hls, e := NewHls(kv, "${PID}-${UNAME}-${TITLE}")
+	hls, e := NewHls(opt.NicoSession, kv, "${PID}-${UNAME}-${TITLE}")
 	if e != nil {
 		err = e
 		fmt.Println(err)

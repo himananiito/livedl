@@ -132,6 +132,7 @@ func (status *Status) getFileName(index int) (name string) {
 	} else {
 		log.Fatalf("No stream")
 	}
+	name = files.ReplaceForbidden(name)
 	return
 }
 func (status *Status) contentsNonOfficialLive() {
@@ -314,17 +315,19 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 	}
 	defer rtmp.Close()
 
+
+	fileName, err := files.GetFileNameNext(status.getFileName(index))
+	if err != nil {
+		return
+	}
+	rtmp.SetFlvName(fileName)
+
+
 	tryRecord := func() (incomplete bool, err error) {
 
 		if err = rtmp.Connect(); err != nil {
 			return
 		}
-
-		fileName, err := files.GetFileNameNext(status.getFileName(index))
-		if err != nil {
-			return
-		}
-		rtmp.SetFlvName(fileName)
 
 		// default: 2500000
 		//if err = rtmp.SetPeerBandwidth(100*1000*1000, 0); err != nil {
@@ -484,7 +487,7 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 		return
 	} // end func
 
-	ticketTime := time.Now().Unix()
+	//ticketTime := time.Now().Unix()
 	//rtmp.SetNoSeek(false)
 	for i := 0; i < 10; i++ {
 		incomplete, e := tryRecord()
@@ -494,19 +497,19 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 			return
 		} else if incomplete && status.isOfficialTs() {
 			fmt.Println("incomplete")
-			time.Sleep(5 * time.Second)
+			time.Sleep(3 * time.Second)
 
 			// update ticket
-			if false {
-				if time.Now().Unix() > ticketTime + 60 {
-					ticketTime = time.Now().Unix()
+			if true {
+				//if time.Now().Unix() > ticketTime + 60 {
+					//ticketTime = time.Now().Unix()
 					if ticket, e := getTicket(opt); e != nil {
 						err = e
 						return
 					} else {
 						rtmp.SetConnectOpt(ticket)
 					}
-				}
+				//}
 			}
 
 			continue

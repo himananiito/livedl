@@ -8,8 +8,14 @@ import (
 	"regexp"
 )
 
-func GetFileNameNext (name string) (fileName string, err error) {
-	fileName = ReplaceForbidden(name)
+func ChangeExtention(fileName, ext string) string {
+	e := filepath.Ext(fileName)
+	base := strings.TrimSuffix(fileName, e)
+	return base + "." + ext
+}
+
+func GetFileNameNext(name string) (fileName string, err error) {
+	fileName = name
 	_, test := os.Stat(fileName)
 	if test == nil {
 		// file Exists

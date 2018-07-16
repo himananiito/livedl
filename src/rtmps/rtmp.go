@@ -65,6 +65,8 @@ type Rtmp struct {
 	VideoExists bool
 	noSeek bool
 	flush bool
+
+	startTime int
 }
 
 func NewRtmp(tc, swf, page string, opt... interface{})(rtmp *Rtmp, err error) {
@@ -370,6 +372,7 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 
 		return
 	}
+	ts = ts + rtmp.startTime
 
 	// byte counter for acknowledgement
 	rtmp.totalReadBytes += rdbytes
@@ -566,6 +569,12 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 			case UC_BUFFEREMPTY:
 				if rtmp.isRecorded {
 					fmt.Printf("required Seek: %d\n", rtmp.timestamp)
+					// <-- test
+					rtmp.PauseRaw()
+					incomplete = true
+					return
+					// test -->
+
 					if rtmp.noSeek {
 						incomplete = true
 						return
@@ -650,7 +659,7 @@ func (rtmp *Rtmp) Command(name string, args []interface{}) (trData interface{}, 
 			csId     = 3
 			streamId = 0
 
-		case "play", "seek", "pause":
+		case "play", "seek", "pause", "pauseRaw":
 			trId     = 0
 			csId     = 8
 			streamId = 1
@@ -701,6 +710,15 @@ func (rtmp *Rtmp) Pause(timestamp int) (err error) {
 
 	return
 }
+func (rtmp *Rtmp) PauseRaw() (err error) {
+	_, err = rtmp.Command("pauseRaw", []interface{}{
+		nil,
+		true,
+		0,
+	})
+
+	return
+}
 func (rtmp *Rtmp) PauseUnpause(timestamp int) (done, incomplete bool, err error) {
 	if err = rtmp.Pause(timestamp); err != nil {
 		return
@@ -718,6 +736,13 @@ fmt.Println("Unpaused")
 	return
 }
 func (rtmp *Rtmp) PlayTime(stream string, timestamp int) (err error) {
+
+	rtmp.startTime = timestamp
+	if rtmp.startTime < 0 {
+		rtmp.startTime = 0
+	}
+	//fmt.Printf("debug rtmp.startTime: %d\n", rtmp.startTime)
+
 	var data []interface{}
 	data = append(data, nil)
 	data = append(data, stream)
