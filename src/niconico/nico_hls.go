@@ -28,7 +28,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	_ "net/http/pprof"
-
+	"../httpbase"
 )
 
 type OBJ = map[string]interface{}
@@ -643,11 +643,10 @@ func (hls *NicoHls) waitAllGoroutines() {
 func (hls *NicoHls) getwaybackkey(threadId string) (waybackkey string, neterr, err error) {
 
 	uri := fmt.Sprintf("http://live.nicovideo.jp/api/getwaybackkey?thread=%s", threadId)
-	req, _ := http.NewRequest("GET", uri, nil)
-	req.Header.Set("Cookie", "user_session=" + hls.NicoSession)
-
-	client := new(http.Client)
-	resp, neterr := client.Do(req)
+	resp, err, neterr := httpbase.Get(uri, map[string]string{"Cookie": "user_session=" + hls.NicoSession})
+	if err != nil {
+		return
+	}
 	if neterr != nil {
 		return
 	}
@@ -686,6 +685,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 				map[string][]string{
 					"Origin": []string{"http://live2.nicovideo.jp"},
 					"Sec-WebSocket-Protocol": []string{"msg.nicovideo.jp#json"},
+					"User-Agent": []string{httpbase.GetUserAgent()},
 				},
 			)
 			if err != nil {
@@ -877,8 +877,11 @@ func urlJoin(base *url.URL, uri string) (res *url.URL, err error) {
 	return
 }
 
-func getString(uri string) (s string, code int, neterr error) {
-	resp, neterr := http.Get(uri)
+func getString(uri string) (s string, code int, err, neterr error) {
+	resp, err, neterr := httpbase.Get(uri, nil)
+	if err != nil {
+		return
+	}
 	if neterr != nil {
 		return
 	}
@@ -898,10 +901,13 @@ func getString(uri string) (s string, code int, neterr error) {
 	return
 }
 
-func getBytes(uri string) (code int, buff []byte, start, tresp, end int64, neterr error) {
+func getBytes(uri string) (code int, buff []byte, start, tresp, end int64, err, neterr error) {
 	start = time.Now().UnixNano()
 
-	resp, neterr := http.Get(uri)
+	resp, err, neterr := httpbase.Get(uri, nil)
+	if err != nil {
+		return
+	}
 	if neterr != nil {
 		return
 	}
@@ -924,8 +930,8 @@ func getBytes(uri string) (code int, buff []byte, start, tresp, end int64, neter
 func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr, err error) {
 //fmt.Printf("saveMedia %v %v\n", seqno, uri)
 
-	code, buff, start, tresp, end, neterr := getBytes(uri)
-	if neterr != nil {
+	code, buff, start, tresp, end, err, neterr := getBytes(uri)
+	if err != nil || neterr != nil {
 		return
 	}
 
@@ -970,8 +976,8 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 
 	start := time.Now().UnixNano()
 
-	m3u8, code, neterr := getString(argUri.String())
-	if neterr != nil {
+	m3u8, code, err, neterr := getString(argUri.String())
+	if err != nil || neterr != nil {
 		return
 	}
 	switch code {
@@ -1100,16 +1106,12 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 			sec := int(hls.playlist.position)
 			var pos string
 			if sec >= 3600 {
-				pos += fmt.Sprintf("%dh", sec / 3600)
-				sec = sec % 3600
+				pos += fmt.Sprintf("%02d:%02d:%02d", sec / 3600, (sec % 3600) / 60, sec % 60)
+			} else {
+				pos += fmt.Sprintf("%02d:%02d", sec / 60, sec % 60)
 			}
-			if sec > 60 {
-				pos += fmt.Sprintf("%02dm", sec / 60)
-				sec = sec % 60
-			}
-			pos += fmt.Sprintf("%02ds", sec)
-
 			fmt.Printf("Current SeqNo: %d, Pos: %s\n", hls.playlist.seqNo, pos)
+
 		} else {
 			fmt.Printf("Current SeqNo: %d\n", hls.playlist.seqNo)
 		}
@@ -1292,7 +1294,9 @@ func (hls *NicoHls) startMain() {
 
 		conn, _, err := websocket.DefaultDialer.Dial(
 			hls.webSocketUrl,
-			map[string][]string{},
+			map[string][]string{
+				"User-Agent": []string{httpbase.GetUserAgent()},
+			},
 		)
 		if err != nil {
 			return NETWORK_ERROR
@@ -1571,11 +1575,12 @@ func getProps(opt options.Option) (props interface{}, notLogin bool, err error) 
 	}
 
 	for i, format := range formats {
-		url := fmt.Sprintf(format, opt.NicoLiveId)
-		req, _ := http.NewRequest("GET", url, nil)
+		uri := fmt.Sprintf(format, opt.NicoLiveId)
+		req, _ := http.NewRequest("GET", uri, nil)
 		if opt.NicoSession != "" {
 			req.Header.Set("Cookie", "user_session=" + opt.NicoSession)
 		}
+		req.Header.Set("User-Agent", httpbase.GetUserAgent())
 
 		client := new(http.Client)
 		var redirect bool
@@ -1634,7 +1639,7 @@ func getProps(opt options.Option) (props interface{}, notLogin bool, err error) 
 
 func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 
-	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 32
+	//http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 32
 
 	var props interface{}
 	props, notLogin, err = getProps(opt)

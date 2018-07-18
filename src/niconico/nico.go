@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"runtime"
 	_ "net/http/pprof"
+	"../httpbase"
 )
 
 func NicoLogin(id, pass string, opt options.Option) (err error) {
@@ -26,17 +27,17 @@ func NicoLogin(id, pass string, opt options.Option) (err error) {
 		err = fmt.Errorf("Login ID/Password not set. Use -nico-login \"<id>,<password>\"")
 		return
 	}
-	tr := &http.Transport {
-	//	IdleConnTimeout: 10 * time.Second,
-	}
-	client := &http.Client{Transport: tr}
 
-	values := url.Values{"mail_tel": {id}, "password": {pass}, "site": {"nicoaccountsdk"}}
-	req, _ := http.NewRequest("POST", "https://account.nicovideo.jp/api/v1/login", strings.NewReader(values.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
-
-	resp, err := client.Do(req)
+	resp, err, neterr := httpbase.PostForm(
+		"https://account.nicovideo.jp/api/v1/login",
+		nil,
+		url.Values{"mail_tel": {id}, "password": {pass}, "site": {"nicoaccountsdk"}},
+	)
 	if err != nil {
+		return
+	}
+	if neterr != nil {
+		err = neterr
 		return
 	}
 	defer resp.Body.Close()
@@ -140,9 +141,14 @@ func TestRun(opt options.Option) (err error) {
 			opt.NicoTestTimeout = 12
 		}
 
-		resp, e := http.Get("http://live.nicovideo.jp/api/getalertinfo")
+
+		resp, e, nete := httpbase.Get("http://live.nicovideo.jp/api/getalertinfo", nil)
 		if e != nil {
 			err = e
+			return
+		}
+		if nete != nil {
+			err = nete
 			return
 		}
 		defer resp.Body.Close()

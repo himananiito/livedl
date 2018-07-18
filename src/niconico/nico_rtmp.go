@@ -9,12 +9,12 @@ import (
 	"net/url"
 	"sync"
 	"log"
-	"net/http"
 	"time"
 	"../rtmps"
 	"../amf"
 	"../options"
 	"../files"
+	"../httpbase"
 )
 
 type Content struct {
@@ -576,34 +576,36 @@ func getTicket(opt options.Option) (ticket string, err error) {
 	return
 }
 func getStatus(opt options.Option) (status *Status, notLogin bool, err error) {
-	var url string
+	var uri string
 
 	// experimental
 	if opt.NicoStatusHTTPS {
-		url = fmt.Sprintf("https://ow.live.nicovideo.jp/api/getplayerstatus?v=%s", opt.NicoLiveId)
+		uri = fmt.Sprintf("https://ow.live.nicovideo.jp/api/getplayerstatus?v=%s", opt.NicoLiveId)
 	} else {
-		url = fmt.Sprintf("http://watch.live.nicovideo.jp/api/getplayerstatus?v=%s", opt.NicoLiveId)
+		uri = fmt.Sprintf("http://watch.live.nicovideo.jp/api/getplayerstatus?v=%s", opt.NicoLiveId)
 	}
 
-	req, _ := http.NewRequest("GET", url, nil)
+	header := make(map[string]string, 4)
 	if opt.NicoSession != "" {
-		req.Header.Set("Cookie", "user_session=" + opt.NicoSession)
+		header["Cookie"] = "user_session=" + opt.NicoSession
 	}
 
 	// experimental
-	if opt.NicoStatusHTTPS {
-		req.Header.Set("User-Agent", "Niconico/1.0 (Unix; U; iPhone OS 10.3.3; ja-jp; nicoiphone; iPhone5,2) Version/6.65")
-	}
+	//if opt.NicoStatusHTTPS {
+	//	req.Header.Set("User-Agent", "Niconico/1.0 (Unix; U; iPhone OS 10.3.3; ja-jp; nicoiphone; iPhone5,2) Version/6.65")
+	//}
 
-	client := new(http.Client)
-	resp, err := client.Do(req)
+	resp, err, neterr := httpbase.Get(uri, header)
 	if err != nil {
-		fmt.Println(err)
+		return
+	}
+	if neterr != nil {
+		err = neterr
 		return
 	}
 	defer resp.Body.Close()
-	dat, _ := ioutil.ReadAll(resp.Body)
 
+	dat, _ := ioutil.ReadAll(resp.Body)
 	status = &Status{}
 	err = xml.Unmarshal(dat, status)
 	if err != nil {

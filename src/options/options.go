@@ -44,7 +44,7 @@ func Help() {
 	ext := filepath.Ext(cmd)
 	cmd = strings.TrimSuffix(cmd, ext)
 
-	format := `%s (%s.%s)
+	format := `%s (%s)
 Usage:
 %s [COMMAND] options... [--] FILE
 
@@ -83,7 +83,7 @@ FILE:
     https://twitcasting.tv/XXXXX
     XXXX
 `
-	fmt.Printf(format, cmd, buildno.BuildDate, buildno.BuildNo, cmd)
+	fmt.Printf(format, cmd, buildno.GetBuildNo(), cmd)
 	os.Exit(0)
 }
 func ParseArgs() (opt Option) {

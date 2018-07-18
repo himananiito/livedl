@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"../files"
+	"../httpbase"
 )
 
 type Twitcas struct {
@@ -33,7 +34,8 @@ func connectStream(proto, host, mode string, id uint64, proxy string) (conn *web
 
 	header := http.Header{}
 	header.Set("Origin", origin)
-	header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36")
+	//header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36")
+	header.Set("User-Agent", httpbase.GetUserAgent())
 
 	timeout, _ := time.ParseDuration("10s")
 	dialer := websocket.Dialer{
