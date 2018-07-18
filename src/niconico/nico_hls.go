@@ -29,6 +29,8 @@ import (
 
 	_ "net/http/pprof"
 	"../httpbase"
+	"github.com/gin-gonic/gin"
+	"context"
 )
 
 type OBJ = map[string]interface{}
@@ -1533,7 +1535,79 @@ func (hls *NicoHls) dbOpen() (err error) {
 	return
 }
 
-func (hls *NicoHls) Wait(testTimeout int) {
+func (hls *NicoHls) serve(hlsPort int) {
+	hls.startMGoroutine(func(sig chan struct{}) int {
+		gin.SetMode(gin.ReleaseMode)
+		router := gin.Default()
+
+		router.GET("", func(c *gin.Context) {
+			seqno := hls.dbGetLastSeqNo()
+			body := fmt.Sprintf(
+`#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:1
+#EXT-X-MEDIA-SEQUENCE:%d
+
+#EXTINF:1.0,
+/ts/%d/test.ts
+
+#EXTINF:1.0,
+/ts/%d/test.ts
+
+#EXTINF:1.0,
+/ts/%d/test.ts
+
+`, seqno - 2, seqno - 2, seqno - 1, seqno)
+			c.Data(http.StatusOK, "application/x-mpegURL", []byte(body))
+			return
+		})
+
+		router.GET("/ts/:idx/test.ts", func(c *gin.Context) {
+			i, _ := strconv.Atoi(c.Param("idx"))
+			b := hls.dbGetLastMedia(i)
+			c.Data(http.StatusOK, "video/MP2T", b)
+			return
+		})
+
+		srv := &http.Server{
+			Addr:           fmt.Sprintf("127.0.0.1:%d", hlsPort),
+			Handler:        router,
+			ReadTimeout:    10 * time.Second,
+			WriteTimeout:   10 * time.Second,
+			MaxHeaderBytes: 1 << 20,
+		}
+
+		chLocal := make(chan struct{})
+		idleConnsClosed := make(chan struct{})
+		defer func(){
+			close(chLocal)
+		}()
+		go func() {
+			select {
+			case <-chLocal:
+			case <-sig:
+			}
+			if err := srv.Shutdown(context.Background()); err != nil {
+				log.Printf("srv.Shutdown: %v\n", err)
+			}
+			close(idleConnsClosed)
+		}()
+
+		// クライアントはlocalhostでなく127.0.0.1で接続すること
+		// localhostは遅いため
+		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+			log.Printf("srv.ListenAndServe: %v\n", err)
+		}
+
+		<-idleConnsClosed
+		return OK
+	})
+}
+
+func (hls *NicoHls) Wait(testTimeout, hlsPort int) {
+
+	hls.startInterrupt()
+	defer hls.stopInterrupt()
 
 	if testTimeout > 0 {
 		hls.startMGoroutine(func(sig chan struct{}) int {
@@ -1547,8 +1621,9 @@ func (hls *NicoHls) Wait(testTimeout int) {
 		})
 	}
 
-	hls.startInterrupt()
-	defer hls.stopInterrupt()
+	if hlsPort > 0 {
+		hls.serve(hlsPort)
+	}
 
 	hls.startMain()
 	for hls.working() {
@@ -1765,7 +1840,7 @@ func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 
 */
 
-	hls.Wait(opt.NicoTestTimeout)
+	hls.Wait(opt.NicoTestTimeout, opt.NicoHlsPort)
 
 	done = true
 

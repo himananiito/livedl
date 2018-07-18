@@ -21,4 +21,5 @@
 *.db
 *.sqlite
 *.sqlite3
+*-journal
 

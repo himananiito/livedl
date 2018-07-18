@@ -382,3 +382,17 @@ func WriteComment(db *sql.DB, fileName string) {
 	}
 	fmt.Fprintln(f, `</packet>`)
 }
+
+// ts
+func (hls *NicoHls) dbGetLastMedia(i int) (res []byte) {
+	hls.dbMtx.Lock()
+	defer hls.dbMtx.Unlock()
+	hls.db.QueryRow("SELECT data FROM media WHERE seqno = ?", i).Scan(&res)
+	return
+}
+func (hls *NicoHls) dbGetLastSeqNo() (res int64) {
+	hls.dbMtx.Lock()
+	defer hls.dbMtx.Unlock()
+	hls.db.QueryRow("SELECT seqno FROM media ORDER BY seqno DESC LIMIT 1").Scan(&res)
+	return
+}

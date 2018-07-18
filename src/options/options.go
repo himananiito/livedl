@@ -31,6 +31,7 @@ type Option struct {
 	ConfPass string
 	ZipFile string
 	DBFile string
+	NicoHlsPort int
 }
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
@@ -68,7 +69,8 @@ COMMAND:
   -nico-rtmp-only                録画時にRTMPのみを試す
   -nico-rtmp-max-conn <num>      RTMPの同時接続数を設定
   -nico-rtmp-index <num>[,<num>] RTMP録画を行うメディアファイルの番号を指定
-  -nico-status-https             [実験的] getplayerstatusの取得にhttpsを使用する
+  -nico-status-https             [廃止] getplayerstatusの取得にhttpsを使用する
+  -nico-hls-port <portnum>       [実験的] ローカルなHLSサーバのポート番号
 
 COMMAND(debugging)
   -nico-test-run (debugging) test for nicolive
@@ -222,6 +224,21 @@ func ParseArgs() (opt Option) {
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?status-?https\z`), func() error {
 			// experimental
 			opt.NicoStatusHTTPS = true
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?hls-?port\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--nico-hls-port: Not a number: %s\n", s)
+			}
+			if num <= 0 {
+				return fmt.Errorf("--nico-hls-port: Invalid: %d: must be greater than or equal to 1\n", num)
+			}
+			opt.NicoHlsPort = num
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?login\z`), func() (err error) {
