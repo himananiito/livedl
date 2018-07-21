@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"io/ioutil"
-	"path/filepath"
 	"../files"
 	"../log4gui"
 
@@ -157,14 +156,11 @@ func (z *ZipMp4) CloseFFInput() {
 }
 func (z *ZipMp4) OpenFFMpeg() {
 	name := files.ChangeExtention(z.ZipName, "mp4")
-	dir := filepath.Dir(name)
-	base := filepath.Base(name)
-	base, err := files.GetFileNameNext(base)
+	name, err := files.GetFileNameNext(name)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	name = filepath.Join(dir, base)
 	z.Mp4NameOpened = name
 
 	cmd, stdin, _, _ := openFFMpeg(true, false, false, true, []string{
@@ -449,29 +445,33 @@ func ConvertDB(fileName string) (err error) {
 	}
 	defer rows.Close()
 
+	prevBw := -1
 	prevIndex := int64(-1)
 	for rows.Next() {
-
+		var bw int
 		var seqno int64
 		var size int
 		var data []byte
-		err = rows.Scan(&seqno, &size, &data)
+		err = rows.Scan(&bw, &seqno, &size, &data)
 		if err != nil {
 			return
 		}
 
-		if prevIndex >= 0 {
-			if seqno != prevIndex + 1 {
-
-				fmt.Printf("\nSeqNo. skipped: %d --> %d\n", prevIndex, seqno)
-				if zm != nil {
-					zm.CloseFFInput()
-					zm.Wait()
-				}
-				zm = &ZipMp4{ZipName: fileName}
-				zm.OpenFFMpeg()
+		if (prevIndex >= 0 && seqno != prevIndex + 1) || (prevBw >= 0 && bw != prevBw) {
+			if bw != prevBw {
+				fmt.Printf("\nBandwitdh changed: %d --> %d\n\n", prevBw, bw)
+			} else {
+				fmt.Printf("\nSeqNo. skipped: %d --> %d\n\n", prevIndex, seqno)
 			}
+
+			if zm != nil {
+				zm.CloseFFInput()
+				zm.Wait()
+			}
+			zm = &ZipMp4{ZipName: fileName}
+			zm.OpenFFMpeg()
 		}
+		prevBw = bw
 		prevIndex = seqno
 
 		zm.FFInput(bytes.NewBuffer(data))

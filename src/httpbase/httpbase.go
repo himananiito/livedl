@@ -41,6 +41,9 @@ func Get(uri string, header map[string]string) (*http.Response, error, error) {
 	return httpBase("GET", uri, header, nil)
 }
 func PostForm(uri string, header map[string]string, val url.Values) (*http.Response, error, error) {
+	if header == nil {
+		header = make(map[string]string)
+	}
 	header["Content-Type"] = "application/x-www-form-urlencoded; charset=utf-8"
 	return httpBase("POST", uri, header, strings.NewReader(val.Encode()))
 }

@@ -14,6 +14,14 @@ func ChangeExtention(fileName, ext string) string {
 	return base + "." + ext
 }
 
+func MkdirByFileName(fileName string) {
+	dir := filepath.Dir(fileName)
+	err := os.MkdirAll(dir, os.ModePerm)
+	if err != nil {
+		fmt.Println(err)
+	}
+}
+
 func GetFileNameNext(name string) (fileName string, err error) {
 	fileName = name
 	_, test := os.Stat(fileName)

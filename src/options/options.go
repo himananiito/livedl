@@ -32,6 +32,8 @@ type Option struct {
 	ZipFile string
 	DBFile string
 	NicoHlsPort int
+	NicoLimitBw int
+	NicoFormat string
 }
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
@@ -71,6 +73,8 @@ COMMAND:
   -nico-rtmp-index <num>[,<num>] RTMP録画を行うメディアファイルの番号を指定
   -nico-status-https             [廃止] getplayerstatusの取得にhttpsを使用する
   -nico-hls-port <portnum>       [実験的] ローカルなHLSサーバのポート番号
+  -nico-limit-bw <bandwidth>     HLSのBANDWIDTHの上限値を指定する
+  -nico-format "FORMAT"          保存時のファイル名を指定する
 
 COMMAND(debugging)
   -nico-test-run (debugging) test for nicolive
@@ -239,6 +243,29 @@ func ParseArgs() (opt Option) {
 				return fmt.Errorf("--nico-hls-port: Invalid: %d: must be greater than or equal to 1\n", num)
 			}
 			opt.NicoHlsPort = num
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?limit-?bw\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--nico-limit-bw: Not a number: %s\n", s)
+			}
+			opt.NicoLimitBw = num
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?(?:format|fmt)\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			if s == "" {
+				return fmt.Errorf("--nico-format: null string not allowed\n", s)
+			}
+			opt.NicoFormat = s
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?login\z`), func() (err error) {

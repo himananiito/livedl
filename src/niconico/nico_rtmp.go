@@ -40,7 +40,7 @@ type Status struct {
 	Tickets               []Tickets `xml:"tickets>stream"`
 	ErrorCode               string  `xml:"error>code"`
 	streams               []Stream
-	chStream                chan bool
+	chStream                chan struct{}
 	wg                     *sync.WaitGroup
 }
 type Stream struct {
@@ -539,7 +539,9 @@ func (status *Status) recAllStreams(opt options.Option) (err error) {
 	}
 
 	status.wg = &sync.WaitGroup{}
-	status.chStream = make(chan bool, MaxConn)
+	status.chStream = make(chan struct{}, MaxConn)
+
+	ticketTime := time.Now().Unix()
 
 	for index, _ := range status.streams {
 		if opt.NicoRtmpIndex != nil {
@@ -548,10 +550,22 @@ func (status *Status) recAllStreams(opt options.Option) (err error) {
 			}
 		}
 
-		status.chStream <- true
+		// blocks here
+		status.chStream <- struct{}{}
 		status.wg.Add(1)
 
 		go status.recStream(index, opt)
+
+		now := time.Now().Unix()
+		if now > ticketTime + 60 {
+			ticketTime = now
+			if ticket, e := getTicket(opt); e != nil {
+				err = e
+				return
+			} else {
+				status.Ticket = ticket
+			}
+		}
 	}
 
 	status.wg.Wait()

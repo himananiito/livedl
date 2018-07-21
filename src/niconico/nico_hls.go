@@ -61,7 +61,7 @@ type NicoHls struct {
 	wgComment *sync.WaitGroup
 	chsComment []chan struct{}
 
-	wgMaster *sync.WaitGroup
+	wgMain *sync.WaitGroup
 	chsMaster []chan struct{}
 
 	commentStarted bool
@@ -89,8 +89,9 @@ type NicoHls struct {
 	commentDone bool
 
 	NicoSession string
+	limitBw int
 }
-func NewHls(NicoSession string, opt map[string]interface{}, format string) (hls *NicoHls, err error) {
+func NewHls(NicoSession string, opt map[string]interface{}, bw int, format string) (hls *NicoHls, err error) {
 
 	broadcastId, ok := opt["broadcastId"].(string)
 	if !ok {
@@ -182,16 +183,18 @@ func NewHls(NicoSession string, opt map[string]interface{}, format string) (hls 
 
 	// "${PID}-${UNAME}-${TITLE}"
 	dbName := format
-	dbName = strings.Replace(dbName, "${PID}", files.ReplaceForbidden(pid), -1)
-	dbName = strings.Replace(dbName, "${UNAME}", files.ReplaceForbidden(uname), -1)
-	dbName = strings.Replace(dbName, "${UID}", files.ReplaceForbidden(uid), -1)
-	dbName = strings.Replace(dbName, "${CNAME}", files.ReplaceForbidden(cname), -1)
-	dbName = strings.Replace(dbName, "${CID}", files.ReplaceForbidden(cid), -1)
-	dbName = strings.Replace(dbName, "${TITLE}", files.ReplaceForbidden(title), -1)
+	dbName = strings.Replace(dbName, "?PID?", files.ReplaceForbidden(pid), -1)
+	dbName = strings.Replace(dbName, "?UNAME?", files.ReplaceForbidden(uname), -1)
+	dbName = strings.Replace(dbName, "?UID?", files.ReplaceForbidden(uid), -1)
+	dbName = strings.Replace(dbName, "?CNAME?", files.ReplaceForbidden(cname), -1)
+	dbName = strings.Replace(dbName, "?CID?", files.ReplaceForbidden(cid), -1)
+	dbName = strings.Replace(dbName, "?TITLE?", files.ReplaceForbidden(title), -1)
 	if timeshift {
 		dbName = dbName + "(TS)"
 	}
 	dbName = dbName + ".sqlite3"
+
+	files.MkdirByFileName(dbName)
 
 	hls = &NicoHls{
 		broadcastId: broadcastId,
@@ -200,7 +203,7 @@ func NewHls(NicoSession string, opt map[string]interface{}, format string) (hls 
 
 		wgPlaylist: &sync.WaitGroup{},
 		wgComment: &sync.WaitGroup{},
-		wgMaster: &sync.WaitGroup{},
+		wgMain: &sync.WaitGroup{},
 
 		quality: "abr",
 		dbName: dbName,
@@ -208,6 +211,7 @@ func NewHls(NicoSession string, opt map[string]interface{}, format string) (hls 
 		isTimeshift: timeshift,
 
 		NicoSession: NicoSession,
+		limitBw: bw,
 	}
 
 	for i := 0; i < 2 ; i++ {
@@ -225,7 +229,7 @@ func NewHls(NicoSession string, opt map[string]interface{}, format string) (hls 
 	}
 
 	// 放送情報をdbに入れる。自身のユーザ情報は入れない
-	// dbに入れたくないデータはキーの先頭が//となっている
+	// dbに入れたくないデータはキーの先頭を//としている
 	for k, v := range opt {
 		if (! strings.HasPrefix(k, "//")) {
 			hls.dbKVSet(k, v)
@@ -556,8 +560,8 @@ func (hls *NicoHls) startGoroutine2(start_t int, f func(chan struct{}) int) {
 //	fmt.Printf("wgComment.Done() %#v\n", hls.wgComment)
 			hls.wgComment.Done()
 		case START_MASTER:
-///	fmt.Printf("wgMaster.Done() %#v\n", hls.wgMaster)
-			hls.wgMaster.Done()
+///	fmt.Printf("wgMain.Done() %#v\n", hls.wgMain)
+			hls.wgMain.Done()
 		}
 
 		hls.checkReturnCode(code)
@@ -576,8 +580,8 @@ func (hls *NicoHls) startGoroutine2(start_t int, f func(chan struct{}) int) {
 		hls.wgComment.Add(1)
 		hls.chsComment = append(hls.chsComment, stopChan)
 	case START_MASTER:
-//fmt.Printf("wgMaster.Add(1) %#v\n", hls.wgMaster)
-		hls.wgMaster.Add(1)
+//fmt.Printf("wgMain.Add(1) %#v\n", hls.wgMain)
+		hls.wgMain.Add(1)
 		hls.chsMaster = append(hls.chsMaster, stopChan)
 	default:
 		log.Fatalf("[FIXME] not implemented start type = %d\n", start_t)
@@ -623,18 +627,12 @@ func (hls *NicoHls) waitRestartMain() bool {
 
 func (hls *NicoHls) waitPGoroutines() {
 	hls.wgPlaylist.Wait()
-//fmt.Printf("wgPlaylist.Wait() %v\n", hls.wgPlaylist)
-	//hls.wgPlaylist = &sync.WaitGroup{}
 }
 func (hls *NicoHls) waitCGoroutines() {
 	hls.wgComment.Wait()
-//fmt.Printf("wgComment.Wait() %#v\n", hls.wgComment)
-
-//	hls.wgComment = &sync.WaitGroup{}
 }
 func (hls *NicoHls) waitMGoroutines() {
-	hls.wgMaster.Wait()
-//	hls.wgMaster = &sync.WaitGroup{}
+	hls.wgMain.Wait()
 }
 func (hls *NicoHls) waitAllGoroutines() {
 	hls.waitPGoroutines()
@@ -1187,11 +1185,33 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 				if err != nil {
 					log.Fatal(err)
 				}
-				if bw > maxBw {
+
+				set := func() {
 					maxBw = bw
 					uri, err = urlJoin(argUri, a[2])
 					if err != nil {
-						panic(err)
+						log.Println(err)
+					}
+				}
+
+				if maxBw == 0 {
+					set()
+
+				} else if hls.limitBw > 0 {
+					// with limit
+					// もし現在値が制限を超えていたら、現在値より小さければセット。
+					if hls.limitBw < maxBw && bw < maxBw {
+						set()
+
+					// 現在値が制限以下で、制限を超えないかつ現在値より大きければセット。
+					} else if maxBw <= hls.limitBw && bw <= hls.limitBw && maxBw < bw {
+						set()
+					}
+
+				} else {
+					// without limit
+					if maxBw < bw {
+						set()
 					}
 				}
 			}
@@ -1199,12 +1219,16 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 				panic("error")
 			}
 
+			fmt.Printf("BANDWIDTH: %d\n", maxBw)
 			hls.playlist.bandwidth = maxBw
 			if (! hls.isTimeshift) {
 				hls.playlist.uriMaster = argUri
 				hls.playlist.uri = uri
 			}
 			return hls.getPlaylist1(uri)
+
+		} else {
+			log.Println("playlist error")
 		}
 	}
 	return
@@ -1786,7 +1810,14 @@ func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 		}
 	}
 
-	hls, e := NewHls(opt.NicoSession, kv, "${PID}-${UNAME}-${TITLE}")
+	var format string
+	if opt.NicoFormat != "" {
+		format = opt.NicoFormat
+	} else {
+		format = "?PID?-?UNAME?-?TITLE?"
+	}
+
+	hls, e := NewHls(opt.NicoSession, kv, opt.NicoLimitBw, format)
 	if e != nil {
 		err = e
 		fmt.Println(err)

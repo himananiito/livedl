@@ -13,7 +13,7 @@ import (
 )
 
 var SelMedia = `SELECT
-	seqno, size, data FROM media
+	bandwidth, seqno, size, data FROM media
 	WHERE data IS NOT NULL ORDER BY seqno`
 
 var SelComment = `SELECT
