@@ -60,10 +60,10 @@ func (sub *SubDownloader) write(pos int64, rdr io.Reader) (err error) {
 		sub.open()
 	}
 	if _, err = sub.file.Seek(pos, 0); err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 	if _, err = io.Copy(sub.file, rdr); err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 	return
 }

@@ -544,7 +544,7 @@ func (hls *NicoHls) startGoroutine2(start_t int, f func(chan struct{}) int) {
 	stopChan := make(chan struct{}, 10)
 
 	if runtime.NumGoroutine() > 100 {
-		panic("too many goroutines")
+		log.Fatalln("too many goroutines")
 	}
 
 	go func(start_t int){
@@ -1006,7 +1006,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 			if hls.isTimeshift {
 				n, err := strconv.ParseFloat(ma[1], 64)
 				if err != nil {
-					panic(err)
+					log.Fatalln(err)
 				}
 				currentPos = n
 				hls.playlist.position = currentPos
@@ -1056,7 +1056,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 			if hls.isTimeshift || i == 0 {
 				d, err := strconv.ParseFloat(a[1], 64)
 				if err != nil {
-					panic(err)
+					log.Fatalln(err)
 				}
 
 				if hls.isTimeshift {
@@ -1069,7 +1069,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 
 			uri, err := urlJoin(argUri, a[2])
 			if err != nil {
-				panic(err)
+				log.Fatalln(err)
 			}
 
 			seqlist = append(seqlist, seq_t{
@@ -1216,7 +1216,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 				}
 			}
 			if uri == nil {
-				panic("error")
+				log.Fatalln("playlist uri not defined")
 			}
 
 			fmt.Printf("BANDWIDTH: %d\n", maxBw)

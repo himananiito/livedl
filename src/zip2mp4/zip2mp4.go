@@ -53,14 +53,14 @@ func openProg(cmdList *[]string, stdinEn, stdoutEn, stdErrEn, consoleEn bool, ar
 		if stdinEn {
 			stdin, err = cmd.StdinPipe()
 			if err != nil {
-				panic(err)
+				log.Fatalln(err)
 			}
 		}
 
 		if stdoutEn {
 			stdout, err = cmd.StdoutPipe()
 			if err != nil {
-				panic(err)
+				log.Fatalln(err)
 			}
 		} else {
 			if consoleEn {
@@ -71,7 +71,7 @@ func openProg(cmdList *[]string, stdinEn, stdoutEn, stdErrEn, consoleEn bool, ar
 		if stdErrEn {
 			stderr, err = cmd.StderrPipe()
 			if err != nil {
-				panic(err)
+				log.Fatalln(err)
 			}
 		} else {
 			if consoleEn {
@@ -146,7 +146,7 @@ func openMP42TS(consoleEn bool, args []string) (cmd *exec.Cmd) {
 func (z *ZipMp4) Wait() {
 	if z.FFMpeg != nil {
 		if err := z.FFMpeg.Wait(); err != nil {
-			panic(err)
+			log.Fatalln(err)
 		}
 		z.FFMpeg = nil
 	}
@@ -170,7 +170,7 @@ func (z *ZipMp4) OpenFFMpeg() {
 		name,
 	})
 	if cmd == nil {
-		panic("ffmpeg not installed")
+		log.Fatalln("ffmpeg not installed")
 	}
 
 	z.FFMpeg = cmd
@@ -202,10 +202,10 @@ func (z *ZipMp4) FFInputCombFromFile(videoFile, audioFile string) {
 	defer os.Remove(aTs)
 
 	if err := cmdV.Wait(); err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 	if err := cmdA.Wait(); err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 
 	cmd, _, stdout, _ := openFFMpeg(false, true, false, false, []string{
@@ -216,18 +216,18 @@ func (z *ZipMp4) FFInputCombFromFile(videoFile, audioFile string) {
 		"-",
 	})
 	if cmd == nil {
-		panic("ffmpeg not installed")
+		log.Fatalln("ffmpeg not installed")
 	}
 
 	z.FFInput(stdout)
 
 	if err := cmd.Wait(); err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 }
 func (z *ZipMp4) FFInput(rdr io.Reader) {
 	if _, err := io.Copy(z.FFStdin, rdr); err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 }
 
@@ -337,7 +337,7 @@ func Convert(fileName string) (err error) {
 		if chunks[key].VAIndex != nil {
 			r, e := zr.File[chunks[key].VAIndex.int].Open()
 			if e != nil {
-				panic(e)
+				log.Fatalln(e)
 			}
 			zm.FFInput(r)
 			r.Close()
@@ -347,7 +347,7 @@ func Convert(fileName string) (err error) {
 			if tmpVideoName == "" {
 				f, e := ioutil.TempFile(".", "__temp-")
 				if e != nil {
-					panic(e)
+					log.Fatalln(e)
 				}
 				f.Close()
 				tmpVideoName = f.Name()
@@ -355,7 +355,7 @@ func Convert(fileName string) (err error) {
 			if tmpAudioName == "" {
 				f, e := ioutil.TempFile(".", "__temp-")
 				if e != nil {
-					panic(e)
+					log.Fatalln(e)
 				}
 				f.Close()
 				tmpAudioName = f.Name()
@@ -364,20 +364,20 @@ func Convert(fileName string) (err error) {
 			// open temporary file
 			tmpVideo, err := os.Create(tmpVideoName)
 			if err != nil {
-				panic(err)
+				log.Fatalln(err)
 			}
 			tmpAudio, err := os.Create(tmpAudioName)
 			if err != nil {
-				panic(err)
+				log.Fatalln(err)
 			}
 
 			// copy Video to file
 			rv, e := zr.File[chunks[key].VideoIndex.int].Open()
 			if e != nil {
-				panic(e)
+				log.Fatalln(e)
 			}
 			if _, e := io.Copy(tmpVideo, rv); e != nil {
-				panic(e)
+				log.Fatalln(e)
 			}
 			rv.Close()
 			tmpVideo.Close()
@@ -385,10 +385,10 @@ func Convert(fileName string) (err error) {
 			// copy Audio to file
 			ra, e := zr.File[chunks[key].AudioIndex.int].Open()
 			if e != nil {
-				panic(e)
+				log.Fatalln(e)
 			}
 			if _, e := io.Copy(tmpAudio, ra); e != nil {
-				panic(e)
+				log.Fatalln(e)
 			}
 			ra.Close()
 			tmpAudio.Close()

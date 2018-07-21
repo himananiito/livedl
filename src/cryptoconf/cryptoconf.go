@@ -10,6 +10,7 @@ import (
 	"os"
 	"encoding/json"
 	"fmt"
+	"log"
 )
 
 func Set(dataSet map[string]string, fileName, pass string) (err error) {
@@ -29,19 +30,18 @@ func Set(dataSet map[string]string, fileName, pass string) (err error) {
 	digest := sha3.Sum256([]byte(pass))
 	block, err := aes.NewCipher(digest[:])
 	if err != nil {
-		panic(err)
-		os.Exit(-1)
+		log.Fatalln(err)
 	}
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		panic(err.Error())
+		log.Fatalln(err.Error())
 	}
 
 	nonceSize := aesgcm.NonceSize()
 	// Never use more than 2^32 random nonces with a given key because of the risk of a repeat.
 	nonce := make([]byte, nonceSize)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		panic(err.Error())
+		log.Fatalln(err.Error())
 	}
 
 	plaintext, err := json.Marshal(data)
@@ -73,11 +73,11 @@ func Load(file, pass string) (data map[string]interface{}, err error) {
 	digest := sha3.Sum256([]byte(pass))
 	block, err := aes.NewCipher(digest[:])
 	if err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		panic(err.Error())
+		log.Fatalln(err.Error())
 	}
 
 	nonceSize := aesgcm.NonceSize()

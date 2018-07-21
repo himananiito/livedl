@@ -23,6 +23,7 @@ import (
 
 	"../httpsub"
 	"../zip2mp4"
+	"log"
 )
 
 type YtDash struct {
@@ -194,14 +195,14 @@ fmt.Println(uri)
 	// ffmpeg Not exists OR merge NG
 	fv, e := os.Open(vname)
 	if e != nil {
-		panic(e)
+		log.Fatalln(e)
 	}
 	yt.WriteZip("video.mp4", fv)
 	fv.Close()
 
 	fa, e := os.Open(aname)
 	if e != nil {
-		panic(e)
+		log.Fatalln(e)
 	}
 	yt.WriteZip("audio.mp4", fa)
 	fa.Close()
@@ -244,7 +245,7 @@ func (yt *YtDash) OpenFile() (err error) {
 
 	file, err := os.Create(fileName)
 	if err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 	yt.zipFile = file
 
