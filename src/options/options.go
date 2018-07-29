@@ -4,12 +4,16 @@ import (
 	"fmt"
 	"regexp"
 	"os"
+	"log"
 	"strconv"
 	"strings"
 	"path/filepath"
 	"io/ioutil"
+	"database/sql"
+	"golang.org/x/crypto/sha3"
 	"../buildno"
 	"../cryptoconf"
+	"../files"
 )
 
 type Option struct {
@@ -17,8 +21,7 @@ type Option struct {
 	NicoLiveId string
 	NicoStatusHTTPS bool
 	NicoSession string
-	NicoLoginId string
-	NicoLoginPass string
+	NicoLoginAlias string
 	NicoRtmpMaxConn int
 	NicoRtmpOnly bool
 	NicoRtmpIndex map[int]bool
@@ -27,13 +30,15 @@ type Option struct {
 	NicoTestTimeout int
 	TcasId string
 	YoutubeId string
-	ConfFile string
-	ConfPass string
+	ConfFile string // deprecated
+	ConfPass string // deprecated
 	ZipFile string
 	DBFile string
 	NicoHlsPort int
 	NicoLimitBw int
 	NicoFormat string
+	NicoFastTs bool
+	NicoUltraFastTs bool
 }
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
@@ -59,22 +64,30 @@ COMMAND:
   -d2m     録画済みのdb(.sqlite3)をmp4に変換する(-db-to-mp4)
 
 オプション/option:
-  -conf-pass <password> 設定ファイルのパスワード
+  -conf-pass <password> [廃止] 設定ファイルのパスワード
   -h                    ヘルプを表示
   --                    後にオプションが無いことを指定
 
 オプション/option (ニコニコ生放送/nicolive):
-  -nico-login <id>,<password>    ニコニコのIDとパスワードを設定し設定ファイルに書き込む
-  -nico-session <session>        Cookie[user_session]を設定し設定ファイルに書き込む
+  -nico-login <id>,<password>    (+) ニコニコのIDとパスワードを指定する
+  -nico-session <session>        Cookie[user_session]を指定する
   -nico-login-only               非ログインで視聴可能の番組でも必ずログイン状態で録画する
   -nico-hls-only                 録画時にHLSのみを試す
+  -nico-hls-only=on              (+) 上記を有効に設定
+  -nico-hls-only=off             (+) 上記を無効に設定
   -nico-rtmp-only                録画時にRTMPのみを試す
+  -nico-rtmp-only=on             (+) 上記を有効に設定
+  -nico-rtmp-only=off            (+) 上記を無効に設定
   -nico-rtmp-max-conn <num>      RTMPの同時接続数を設定
   -nico-rtmp-index <num>[,<num>] RTMP録画を行うメディアファイルの番号を指定
-  -nico-status-https             [廃止] getplayerstatusの取得にhttpsを使用する
   -nico-hls-port <portnum>       [実験的] ローカルなHLSサーバのポート番号
-  -nico-limit-bw <bandwidth>     HLSのBANDWIDTHの上限値を指定する
-  -nico-format "FORMAT"          保存時のファイル名を指定する
+  -nico-limit-bw <bandwidth>     (+) HLSのBANDWIDTHの上限値を指定する。0=制限なし
+  -nico-format "FORMAT"          (+) 保存時のファイル名を指定する
+  -nico-fast-ts                  倍速タイムシフト録画を行う(新配信タイムシフト)
+  -nico-fast-ts=on               (+) 上記を有効に設定
+  -nico-fast-ts=off              (+) 上記を無効に設定
+
+(+)のついたオプションは、次回も同じ設定が使用されることを示す。
 
 COMMAND(debugging)
   -nico-test-run (debugging) test for nicolive
@@ -87,12 +100,170 @@ FILE:
     lvXXXXXXXXX
   ツイキャス/twitcasting:
     https://twitcasting.tv/XXXXX
-    XXXX
 `
 	fmt.Printf(format, cmd, buildno.GetBuildNo(), cmd)
 	os.Exit(0)
 }
+
+func dbConfSet(db *sql.DB, k string, v interface{}) {
+	query := `INSERT OR REPLACE INTO conf (k,v) VALUES (?,?)`
+
+	if _, err := db.Exec(query, k, v); err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+}
+
+func SetNicoLogin(hash, user, pass string) (err error) {
+	db, err := dbAccountOpen()
+	if err != nil {
+		if db != nil {
+			db.Close()
+		}
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`
+		INSERT OR IGNORE INTO niconico (alias, user, pass) VALUES(?, ?, ?);
+		UPDATE niconico SET user = ?, pass = ? WHERE alias = ?
+	`, hash, user, pass, user, pass, hash)
+	if err != nil {
+		fmt.Println(err)
+	}
+	return
+}
+func SetNicoSession(hash, session string) (err error) {
+	db, err := dbAccountOpen()
+	if err != nil {
+		if db != nil {
+			db.Close()
+		}
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`
+		INSERT OR IGNORE INTO niconico (alias, session) VALUES(?, ?);
+		UPDATE niconico SET session = ? WHERE alias = ?
+	`, hash, session, session, hash)
+	if err != nil {
+		fmt.Println(err)
+	}
+	return
+}
+func LoadNicoAccount(alias string) (user, pass, session string, err error){
+	db, err := dbAccountOpen()
+	if err != nil {
+		if db != nil {
+			db.Close()
+		}
+		return
+	}
+	defer db.Close()
+
+	db.QueryRow(`SELECT user, pass, IFNULL(session, "") FROM niconico WHERE alias = ?`, alias).Scan(&user, &pass, &session)
+	return
+}
+func dbAccountOpen() (db *sql.DB, err error) {
+
+	base := func() string {
+		if b := os.Getenv("LIVEDL_DIR"); b != "" {
+			return b
+		}
+		if b := os.Getenv("APPDATA"); b != "" {
+			return fmt.Sprintf("%s/livedl", b)
+		}
+		if b := os.Getenv("HOME"); b != "" {
+			return fmt.Sprintf("%s/.livedl", b)
+		}
+		return ""
+	}()
+	if base == "" {
+		log.Fatalln("basedir for account not defined")
+	}
+
+	name := fmt.Sprintf("%s/account.db", base)
+	files.MkdirByFileName(name)
+	db, err = sql.Open("sqlite3", name)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS niconico (
+		alias TEXT PRIMARY KEY NOT NULL UNIQUE,
+		user TEXT NOT NULL,
+		pass TEXT NOT NULL,
+		session TEXT
+	)
+	`)
+	if err != nil {
+		return
+	}
+
+	_, err = db.Exec(`
+	CREATE UNIQUE INDEX IF NOT EXISTS niconico0 ON niconico(alias);
+	CREATE UNIQUE INDEX IF NOT EXISTS niconico1 ON niconico(user);
+	`)
+	if err != nil {
+		return
+	}
+	return
+}
+
+
+func dbOpen() (db *sql.DB, err error) {
+	db, err = sql.Open("sqlite3", "conf.db")
+	if err != nil {
+		return
+	}
+
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS conf (
+		k TEXT PRIMARY KEY NOT NULL UNIQUE,
+		v BLOB
+	)
+	`)
+	if err != nil {
+		return
+	}
+
+	_, err = db.Exec(`
+	CREATE UNIQUE INDEX IF NOT EXISTS conf0 ON conf(k);
+	`)
+	if err != nil {
+		return
+	}
+	return
+}
+
 func ParseArgs() (opt Option) {
+dbAccountOpen()
+	db, err := dbOpen()
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	db.QueryRow(`
+		SELECT
+		IFNULL((SELECT v FROM conf WHERE k == "NicoFormat"), ""),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoLimitBw"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoHlsOnly"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoRtmpOnly"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoFastTs"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoLoginAlias"), "")
+	`).Scan(
+		&opt.NicoFormat,
+		&opt.NicoLimitBw,
+		&opt.NicoHlsOnly,
+		&opt.NicoRtmpOnly,
+		&opt.NicoFastTs,
+		&opt.NicoLoginAlias,
+	)
 
 	args := os.Args[1:]
 	var match []string
@@ -196,12 +367,44 @@ func ParseArgs() (opt Option) {
 			opt.NicoLoginOnly = true
 			return nil
 		}},
-		Parser{regexp.MustCompile(`\A(?i)--?nico-?hls-?only\z`), func() error {
-			opt.NicoHlsOnly = true
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?hls-?only(?:=(on|off))?\z`), func() error {
+			if strings.EqualFold(match[1], "on") {
+				opt.NicoHlsOnly = true
+				dbConfSet(db, "NicoHlsOnly", opt.NicoHlsOnly)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.NicoHlsOnly = false
+				dbConfSet(db, "NicoHlsOnly", opt.NicoHlsOnly)
+			} else {
+				opt.NicoHlsOnly = true
+			}
 			return nil
 		}},
-		Parser{regexp.MustCompile(`\A(?i)--?nico-?rtmp-?only\z`), func() error {
-			opt.NicoRtmpOnly = true
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?rtmp-?only(?:=(on|off))?\z`), func() error {
+			if strings.EqualFold(match[1], "on") {
+				opt.NicoRtmpOnly = true
+				dbConfSet(db, "NicoRtmpOnly", opt.NicoRtmpOnly)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.NicoRtmpOnly = false
+				dbConfSet(db, "NicoRtmpOnly", opt.NicoRtmpOnly)
+			} else {
+				opt.NicoRtmpOnly = true
+			}
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?fast-?ts(?:=(on|off))?\z`), func() error {
+			if strings.EqualFold(match[1], "on") {
+				opt.NicoFastTs = true
+				dbConfSet(db, "NicoFastTs", opt.NicoFastTs)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.NicoFastTs = false
+				dbConfSet(db, "NicoFastTs", opt.NicoFastTs)
+			} else {
+				opt.NicoFastTs = true
+			}
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?(?:u|ultra)fast-?ts\z`), func() error {
+			opt.NicoUltraFastTs = true
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?rtmp-?index\z`), func() (err error) {
@@ -255,6 +458,7 @@ func ParseArgs() (opt Option) {
 				return fmt.Errorf("--nico-limit-bw: Not a number: %s\n", s)
 			}
 			opt.NicoLimitBw = num
+			dbConfSet(db, "NicoLimitBw", opt.NicoLimitBw)
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?(?:format|fmt)\z`), func() (err error) {
@@ -266,6 +470,7 @@ func ParseArgs() (opt Option) {
 				return fmt.Errorf("--nico-format: null string not allowed\n", s)
 			}
 			opt.NicoFormat = s
+			dbConfSet(db, "NicoFormat", opt.NicoFormat)
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?login\z`), func() (err error) {
@@ -274,9 +479,13 @@ func ParseArgs() (opt Option) {
 				return
 			}
 			ar := strings.SplitN(str, ",", 2)
-			if len(ar) >= 2 {
-				opt.NicoLoginId = ar[0]
-				opt.NicoLoginPass = ar[1]
+			if len(ar) >= 2 && ar[0] != "" {
+				loginId := ar[0]
+				loginPass := ar[1]
+				opt.NicoLoginAlias = fmt.Sprintf("%x", sha3.Sum256([]byte(loginId)))
+				SetNicoLogin(opt.NicoLoginAlias, loginId, loginPass)
+				dbConfSet(db, "NicoLoginAlias", opt.NicoLoginAlias)
+
 			} else {
 				return fmt.Errorf("--nico-login: <id>,<password>")
 			}
@@ -420,21 +629,23 @@ func ParseArgs() (opt Option) {
 		opt.ConfFile = fmt.Sprintf("%s.conf", getCmd())
 	}
 
-	// store account
-	setData := map[string]string{}
-	if opt.NicoLoginId != "" || opt.NicoLoginPass != "" {
-		setData["NicoLoginId"] = opt.NicoLoginId
-		setData["NicoLoginPass"] = opt.NicoLoginPass
-	}
-	if opt.NicoSession != "" {
-		setData["NicoSession"] = opt.NicoSession
-	}
-	if len(setData) > 0 {
-		if err := cryptoconf.Set(setData, opt.ConfFile, opt.ConfPass); err != nil {
-			fmt.Println(err)
-			return
+	// [deprecated]
+	// load session info
+	if data, e := cryptoconf.Load(opt.ConfFile, opt.ConfPass); e != nil {
+		err = e
+		return
+	} else {
+		loginId, _ := data["NicoLoginId"].(string)
+		if loginId != "" {
+			loginPass, _ := data["NicoLoginPass"].(string)
+			hash := fmt.Sprintf("%x", sha3.Sum256([]byte(loginId)))
+			SetNicoLogin(hash, loginId, loginPass)
+			if opt.NicoLoginAlias == "" {
+				opt.NicoLoginAlias = hash
+				dbConfSet(db, "NicoLoginAlias", opt.NicoLoginAlias)
+			}
+			os.Remove(opt.ConfFile)
 		}
-		fmt.Println("account saved")
 	}
 
 	switch opt.Command {
@@ -466,6 +677,13 @@ func ParseArgs() (opt Option) {
 		fmt.Printf("[FIXME] options.go/argcheck for %s\n", opt.Command)
 		os.Exit(1)
 	}
+
+	// prints
+	fmt.Printf("Conf(NicoFormat): %#v\n", opt.NicoFormat)
+	fmt.Printf("Conf(NicoLimitBw): %#v\n", opt.NicoLimitBw)
+	fmt.Printf("Conf(NicoHlsOnly): %#v\n", opt.NicoHlsOnly)
+	fmt.Printf("Conf(NicoRtmpOnly): %#v\n", opt.NicoRtmpOnly)
+	fmt.Printf("Conf(NicoFastTs): %#v\n", opt.NicoFastTs)
 
 	return
 }

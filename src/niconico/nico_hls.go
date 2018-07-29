@@ -38,7 +38,7 @@ type OBJ = map[string]interface{}
 type playlist struct {
 	uri *url.URL
 	uriMaster *url.URL
-	uriTimeshift *url.URL
+	uriTimeshiftMaster *url.URL
 	bandwidth int
 	nextTime time.Time
 	format string
@@ -84,6 +84,8 @@ type NicoHls struct {
 
 	isTimeshift bool
 	timeshiftStart float64
+	fastTimeshift bool
+	ultrafastTimeshift bool
 
 	finish bool
 	commentDone bool
@@ -91,21 +93,21 @@ type NicoHls struct {
 	NicoSession string
 	limitBw int
 }
-func NewHls(NicoSession string, opt map[string]interface{}, bw int, format string) (hls *NicoHls, err error) {
+func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err error) {
 
-	broadcastId, ok := opt["broadcastId"].(string)
+	broadcastId, ok := prop["broadcastId"].(string)
 	if !ok {
 		err = fmt.Errorf("broadcastId is not string")
 		return
 	}
 
-	webSocketUrl, ok := opt["//webSocketUrl"].(string)
+	webSocketUrl, ok := prop["//webSocketUrl"].(string)
 	if !ok {
 		err = fmt.Errorf("webSocketUrl is not string")
 		return
 	}
 
-	myUserId, ok := opt["//myId"].(string)
+	myUserId, ok := prop["//myId"].(string)
 	if !ok {
 		err = fmt.Errorf("userId is not string")
 		return
@@ -115,14 +117,14 @@ func NewHls(NicoSession string, opt map[string]interface{}, bw int, format strin
 	}
 
 	var timeshift bool
-	if status, ok := opt["status"].(string); ok && status == "ENDED" {
+	if status, ok := prop["status"].(string); ok && status == "ENDED" {
 		timeshift = true
 	}
 
 
 
 	var pid string
-	if nicoliveProgramId, ok := opt["nicoliveProgramId"]; ok {
+	if nicoliveProgramId, ok := prop["nicoliveProgramId"]; ok {
 		pid, _ = nicoliveProgramId.(string)
 	}
 
@@ -132,7 +134,7 @@ func NewHls(NicoSession string, opt map[string]interface{}, bw int, format strin
 	var cid string // コミュID or チャンネルID
 
 	var pt string
-	if providerType, ok := opt["providerType"]; ok {
+	if providerType, ok := prop["providerType"]; ok {
 		if pt, ok = providerType.(string); ok {
 			if pt == "official" {
 				uname = "official"
@@ -144,16 +146,16 @@ func NewHls(NicoSession string, opt map[string]interface{}, bw int, format strin
 	}
 
 	// ユーザ名
-	if userName, ok := opt["userName"]; ok {
+	if userName, ok := prop["userName"]; ok {
 		uname, _ = userName.(string)
 	}
 
 	// ユーザID
-	if userPageUrl, ok := opt["userPageUrl"]; ok {
+	if userPageUrl, ok := prop["userPageUrl"]; ok {
 		if u, ok := userPageUrl.(string); ok {
 			if m := regexp.MustCompile(`/user/(\d+)`).FindStringSubmatch(u); len(m) > 0 {
 				uid = m[1]
-				opt["userId"] = uid
+				prop["userId"] = uid
 			}
 		}
 	}
@@ -162,27 +164,27 @@ func NewHls(NicoSession string, opt map[string]interface{}, bw int, format strin
 	}
 
 	// コミュ名
-	if socName, ok := opt["socName"]; ok {
+	if socName, ok := prop["socName"]; ok {
 		cname, _ = socName.(string)
 	}
 
 	// コミュID
-	if comId, ok := opt["comId"]; ok {
+	if comId, ok := prop["comId"]; ok {
 		cid, _ = comId.(string)
 	}
 	if cid == "" {
-		if socId, ok := opt["socId"]; ok {
+		if socId, ok := prop["socId"]; ok {
 			cid, _ = socId.(string)
 		}
 	}
 
 	var title string
-	if t, ok := opt["title"]; ok {
+	if t, ok := prop["title"]; ok {
 		title, _ = t.(string)
 	}
 
 	// "${PID}-${UNAME}-${TITLE}"
-	dbName := format
+	dbName := opt.NicoFormat
 	dbName = strings.Replace(dbName, "?PID?", files.ReplaceForbidden(pid), -1)
 	dbName = strings.Replace(dbName, "?UNAME?", files.ReplaceForbidden(uname), -1)
 	dbName = strings.Replace(dbName, "?UID?", files.ReplaceForbidden(uid), -1)
@@ -209,9 +211,11 @@ func NewHls(NicoSession string, opt map[string]interface{}, bw int, format strin
 		dbName: dbName,
 
 		isTimeshift: timeshift,
+		fastTimeshift: opt.NicoFastTs || opt.NicoUltraFastTs,
+		ultrafastTimeshift: opt.NicoUltraFastTs,
 
-		NicoSession: NicoSession,
-		limitBw: bw,
+		NicoSession: opt.NicoSession,
+		limitBw: opt.NicoLimitBw,
 	}
 
 	for i := 0; i < 2 ; i++ {
@@ -230,7 +234,7 @@ func NewHls(NicoSession string, opt map[string]interface{}, bw int, format strin
 
 	// 放送情報をdbに入れる。自身のユーザ情報は入れない
 	// dbに入れたくないデータはキーの先頭を//としている
-	for k, v := range opt {
+	for k, v := range prop {
 		if (! strings.HasPrefix(k, "//")) {
 			hls.dbKVSet(k, v)
 		}
@@ -972,7 +976,7 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr,
 	return
 }
 
-func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, err error) {
+func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, neterr, err error) {
 
 	start := time.Now().UnixNano()
 
@@ -985,8 +989,14 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 	case 403:
 		is403 = true
 		return
+	case 500:
 	default:
-		err = fmt.Errorf("playlist code: %d: %s", code, hls.playlist.uri.String())
+		if 500 <= code && code <= 599 {
+			is500 = true
+			return
+		}
+		fmt.Printf("#### playlist code: %d: %s\n", code, argUri.String())
+		err = fmt.Errorf("playlist code: %d: %s", code, argUri.String())
 		return
 	}
 
@@ -1035,6 +1045,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 		ma := re.FindAllStringSubmatch(m3u8, -1)
 
 		if len(ma) == 0 {
+			log.Println("No medias in playlist")
 			hls.playlist.nextTime = time.Now().Add(time.Second)
 			return
 		}
@@ -1061,9 +1072,13 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 
 				if hls.isTimeshift {
 					duration += d
-				} else {
-					t := time.Duration(float64(time.Second) * (d + 0.5))
-					hls.playlist.nextTime = time.Now().Add(t)
+				}
+
+				if i == 0 {
+					if (! hls.isTimeshift) || (! hls.fastTimeshift) {
+						t := time.Duration(float64(time.Second) * (d + 0.5))
+						hls.playlist.nextTime = time.Now().Add(t)
+					}
 				}
 			}
 
@@ -1099,6 +1114,11 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 
 		if hls.isTimeshift {
 			hls.timeshiftStart = currentPos + duration - 0.49
+
+			if (! hls.ultrafastTimeshift) {
+				td := duration * float64(time.Second) / 6
+				hls.playlist.nextTime = time.Now().Add(time.Duration(td))
+			}
 		}
 
 		// prints Current SeqNo
@@ -1221,7 +1241,9 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd bool, neterr, er
 
 			fmt.Printf("BANDWIDTH: %d\n", maxBw)
 			hls.playlist.bandwidth = maxBw
-			if (! hls.isTimeshift) {
+			if hls.isTimeshift && hls.fastTimeshift {
+
+			} else {
 				hls.playlist.uriMaster = argUri
 				hls.playlist.uri = uri
 			}
@@ -1243,14 +1265,19 @@ func (hls *NicoHls) startPlaylist(uri string) {
 			return PLAYLIST_ERROR
 		}
 
+		hls.playlist.uri = u
 		if hls.isTimeshift {
-			hls.playlist.uriTimeshift = u
-		} else {
-			hls.playlist.uri = u
+			hls.playlist.uriTimeshiftMaster = u
 		}
 
 		if hls.isTimeshift {
 			hls.timeshiftStart = hls.dbGetLastPosition()
+
+			u := hls.playlist.uriTimeshiftMaster.String()
+			u = regexp.MustCompile(`&start=\d+(?:\.\d*)?`).ReplaceAllString(u, "")
+			u += fmt.Sprintf("&start=%f", hls.timeshiftStart)
+			uri, _ := url.Parse(u)
+			hls.playlist.uri = uri
 		}
 
 		for hls.nInterrupt == 0 {
@@ -1268,8 +1295,8 @@ func (hls *NicoHls) startPlaylist(uri string) {
 			select {
 			case <-time.After(dur):
 				var uri *url.URL
-				if hls.isTimeshift {
-					u := hls.playlist.uriTimeshift.String()
+				if hls.isTimeshift && hls.fastTimeshift {
+					u := hls.playlist.uriTimeshiftMaster.String()
 					u = regexp.MustCompile(`&start=\d+(?:\.\d*)?`).ReplaceAllString(u, "")
 					u += fmt.Sprintf("&start=%f", hls.timeshiftStart)
 					uri, _ = url.Parse(u)
@@ -1279,10 +1306,16 @@ func (hls *NicoHls) startPlaylist(uri string) {
 
 				//fmt.Println(uri)
 
-				is403, isEnd, neterr, err := hls.getPlaylist1(uri)
+				is403, isEnd, is500, neterr, err := hls.getPlaylist1(uri)
 				if neterr != nil {
 					if hls.nInterrupt == 0 {
 						log.Println("playlist:", e)
+					}
+					return NETWORK_ERROR
+				}
+				if is500 {
+					if hls.nInterrupt == 0 {
+						log.Println("playlist(500):", e)
 					}
 					return NETWORK_ERROR
 				}
@@ -1562,6 +1595,8 @@ func (hls *NicoHls) dbOpen() (err error) {
 func (hls *NicoHls) serve(hlsPort int) {
 	hls.startMGoroutine(func(sig chan struct{}) int {
 		gin.SetMode(gin.ReleaseMode)
+		gin.DefaultErrorWriter = ioutil.Discard
+		gin.DefaultWriter = ioutil.Discard
 		router := gin.Default()
 
 		router.GET("", func(c *gin.Context) {
@@ -1810,14 +1845,11 @@ func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 		}
 	}
 
-	var format string
-	if opt.NicoFormat != "" {
-		format = opt.NicoFormat
-	} else {
-		format = "?PID?-?UNAME?-?TITLE?"
+	if opt.NicoFormat == "" {
+		opt.NicoFormat = "?PID?-?UNAME?-?TITLE?"
 	}
 
-	hls, e := NewHls(opt.NicoSession, kv, opt.NicoLimitBw, format)
+	hls, e := NewHls(opt, kv)
 	if e != nil {
 		err = e
 		fmt.Println(err)

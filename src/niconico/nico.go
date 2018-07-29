@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"../cryptoconf"
 	"../options"
 	"io/ioutil"
 	"regexp"
@@ -22,7 +21,9 @@ import (
 	"../httpbase"
 )
 
-func NicoLogin(id, pass string, opt options.Option) (err error) {
+func NicoLogin(opt options.Option) (err error) {
+	id, pass, _, _ := options.LoadNicoAccount(opt.NicoLoginAlias)
+
 	if id == "" || pass == "" {
 		err = fmt.Errorf("Login ID/Password not set. Use -nico-login \"<id>,<password>\"")
 		return
@@ -48,10 +49,8 @@ func NicoLogin(id, pass string, opt options.Option) (err error) {
 	}
 
 	if ma := regexp.MustCompile(`<session_key>(.+?)</session_key>`).FindSubmatch(body); len(ma) > 0 {
-		data := map[string]string{"NicoSession": string(ma[1])}
-		if err = cryptoconf.Set(data, opt.ConfFile, opt.ConfPass); err != nil {
-			return
-		}
+		options.SetNicoSession(opt.NicoLoginAlias, string(ma[1]))
+
 		fmt.Println("login success")
 	} else {
 		err = fmt.Errorf("login failed: session_key not found")
@@ -64,13 +63,8 @@ func Record(opt options.Option) (err error) {
 
 	for i := 0; i < 2; i++ {
 		// load session info
-		if data, e := cryptoconf.Load(opt.ConfFile, opt.ConfPass); e != nil {
-			err = e
-			return
-		} else {
-			opt.NicoLoginId, _ = data["NicoLoginId"].(string)
-			opt.NicoLoginPass, _ = data["NicoLoginPass"].(string)
-			opt.NicoSession, _ = data["NicoSession"].(string)
+		if opt.NicoSession == "" || i > 0 {
+			_, _, opt.NicoSession, _ = options.LoadNicoAccount(opt.NicoLoginAlias)
 		}
 
 		if (! opt.NicoRtmpOnly) {
@@ -84,7 +78,7 @@ func Record(opt options.Option) (err error) {
 			}
 			if notLogin {
 				fmt.Println("not_login")
-				if err = NicoLogin(opt.NicoLoginId, opt.NicoLoginPass, opt); err != nil {
+				if err = NicoLogin(opt); err != nil {
 					return
 				}
 				continue
@@ -99,7 +93,7 @@ func Record(opt options.Option) (err error) {
 			}
 			if notLogin {
 				fmt.Println("not_login")
-				if err = NicoLogin(opt.NicoLoginId, opt.NicoLoginPass, opt); err != nil {
+				if err = NicoLogin(opt); err != nil {
 					return
 				}
 				continue
