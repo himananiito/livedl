@@ -679,11 +679,13 @@ dbAccountOpen()
 	}
 
 	// prints
-	fmt.Printf("Conf(NicoFormat): %#v\n", opt.NicoFormat)
-	fmt.Printf("Conf(NicoLimitBw): %#v\n", opt.NicoLimitBw)
-	fmt.Printf("Conf(NicoHlsOnly): %#v\n", opt.NicoHlsOnly)
-	fmt.Printf("Conf(NicoRtmpOnly): %#v\n", opt.NicoRtmpOnly)
-	fmt.Printf("Conf(NicoFastTs): %#v\n", opt.NicoFastTs)
+	if opt.Command == "NICOLIVE" {
+		fmt.Printf("Conf(NicoFormat): %#v\n", opt.NicoFormat)
+		fmt.Printf("Conf(NicoLimitBw): %#v\n", opt.NicoLimitBw)
+		fmt.Printf("Conf(NicoHlsOnly): %#v\n", opt.NicoHlsOnly)
+		fmt.Printf("Conf(NicoRtmpOnly): %#v\n", opt.NicoRtmpOnly)
+		fmt.Printf("Conf(NicoFastTs): %#v\n", opt.NicoFastTs)
+	}
 
 	return
 }

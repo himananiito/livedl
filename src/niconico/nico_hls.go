@@ -499,6 +499,8 @@ func (hls *NicoHls) checkReturnCode(code int) {
 		if hls.isTimeshift {
 			if hls.commentDone {
 				hls.stopPCGoroutines()
+			} else if (! hls.commentStarted) {
+				hls.stopPCGoroutines()
 			} else {
 				fmt.Println("waiting comment")
 			}
@@ -673,7 +675,7 @@ func (hls *NicoHls) getTsCommentFromWhen() (res_from int, when float64) {
 }
 
 func (hls *NicoHls) startComment(messageServerUri, threadId string) {
-	if (! hls.commentStarted) {
+	if (! hls.commentStarted) && (! hls.commentDone) {
 		hls.commentStarted = true
 
 		hls.startCGoroutine(func(sig chan struct{}) int {
@@ -762,7 +764,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 									}
 									if err != nil {
 										log.Printf("getwaybackkey: %v\n", err)
-										return OK
+										return COMMENT_DONE
 									}
 
 									_, when := hls.getTsCommentFromWhen()

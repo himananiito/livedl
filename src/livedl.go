@@ -23,10 +23,20 @@ func main() {
 		}
 		baseDir = pwd
 	} else {
-		pa, e := filepath.Abs(os.Args[0])
+		//pa, e := filepath.Abs(os.Args[0])
+		pa, e := os.Executable()
 		if e != nil {
 			fmt.Println(e)
 			return
+		}
+
+		// symlinkを追跡する
+		for {
+			sl, e := os.Readlink(pa)
+			if e != nil {
+				break
+			}
+			pa = sl
 		}
 		baseDir = filepath.Dir(pa)
 	}
