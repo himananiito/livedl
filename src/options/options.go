@@ -39,6 +39,8 @@ type Option struct {
 	NicoFormat string
 	NicoFastTs bool
 	NicoUltraFastTs bool
+	NicoAutoConvert bool
+	NicoAutoDeleteDBMode int // 0:削除しない 1:mp4が分割されなかったら削除 2:分割されても削除
 }
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
@@ -86,6 +88,12 @@ COMMAND:
   -nico-fast-ts                  倍速タイムシフト録画を行う(新配信タイムシフト)
   -nico-fast-ts=on               (+) 上記を有効に設定
   -nico-fast-ts=off              (+) 上記を無効に設定
+  -nico-auto-convert=on          (+) 録画終了後自動的にMP4に変換するように設定
+  -nico-auto-convert=off         (+) 上記を無効に設定
+  -nico-auto-delete-mode 0       (+) 自動変換後にデータベースファイルを削除しないように設定
+  -nico-auto-delete-mode 1       (+) 自動変換でMP4が分割されなかった場合のみ削除するように設定
+  -nico-auto-delete-mode 2       (+) 自動変換でMP4が分割されても削除するように設定
+
 
 (+)のついたオプションは、次回も同じ設定が使用されることを示す。
 
@@ -240,7 +248,7 @@ func dbOpen() (db *sql.DB, err error) {
 }
 
 func ParseArgs() (opt Option) {
-dbAccountOpen()
+	//dbAccountOpen()
 	db, err := dbOpen()
 	if err != nil {
 		log.Println(err)
@@ -248,14 +256,16 @@ dbAccountOpen()
 	}
 	defer db.Close()
 
-	db.QueryRow(`
+	err = db.QueryRow(`
 		SELECT
 		IFNULL((SELECT v FROM conf WHERE k == "NicoFormat"), ""),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoLimitBw"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoHlsOnly"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoRtmpOnly"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoFastTs"), 0),
-		IFNULL((SELECT v FROM conf WHERE k == "NicoLoginAlias"), "")
+		IFNULL((SELECT v FROM conf WHERE k == "NicoLoginAlias"), ""),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoAutoConvert"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoAutoDeleteDBMode"), 0)
 	`).Scan(
 		&opt.NicoFormat,
 		&opt.NicoLimitBw,
@@ -263,7 +273,13 @@ dbAccountOpen()
 		&opt.NicoRtmpOnly,
 		&opt.NicoFastTs,
 		&opt.NicoLoginAlias,
+		&opt.NicoAutoConvert,
+		&opt.NicoAutoDeleteDBMode,
 	)
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
 
 	args := os.Args[1:]
 	var match []string
@@ -403,6 +419,37 @@ dbAccountOpen()
 			}
 			return nil
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?auto-?convert(?:=(on|off))?\z`), func() error {
+			if strings.EqualFold(match[1], "on") {
+				opt.NicoAutoConvert = true
+				dbConfSet(db, "NicoAutoConvert", opt.NicoAutoConvert)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.NicoAutoConvert = false
+				dbConfSet(db, "NicoAutoConvert", opt.NicoAutoConvert)
+			} else {
+				opt.NicoAutoConvert = true
+			}
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?auto-?delete-?mode\z`), func() error {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--nico-auto-delete-mode: Not a number: %s\n", s)
+			}
+			if num < 0 || 2 < num {
+				return fmt.Errorf("--nico-auto-delete-mode: Invalid: %d: one of 0, 1, 2\n", num)
+			}
+
+			opt.NicoAutoDeleteDBMode = num
+			dbConfSet(db, "NicoAutoDeleteDBMode", opt.NicoAutoDeleteDBMode)
+
+			return nil
+		}},
+
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?(?:u|ultra)fast-?ts\z`), func() error {
 			opt.NicoUltraFastTs = true
 			return nil
@@ -685,6 +732,8 @@ dbAccountOpen()
 		fmt.Printf("Conf(NicoHlsOnly): %#v\n", opt.NicoHlsOnly)
 		fmt.Printf("Conf(NicoRtmpOnly): %#v\n", opt.NicoRtmpOnly)
 		fmt.Printf("Conf(NicoFastTs): %#v\n", opt.NicoFastTs)
+		fmt.Printf("Conf(NicoAutoConvert): %#v\n", opt.NicoAutoConvert)
+		fmt.Printf("Conf(NicoAutoDeleteDBMode): %#v\n", opt.NicoAutoDeleteDBMode)
 	}
 
 	return

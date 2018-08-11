@@ -59,7 +59,7 @@ func NicoLogin(opt options.Option) (err error) {
 	return
 }
 
-func Record(opt options.Option) (err error) {
+func Record(opt options.Option) (hlsPlaylistEnd bool, dbName string, err error) {
 
 	for i := 0; i < 2; i++ {
 		// load session info
@@ -68,12 +68,13 @@ func Record(opt options.Option) (err error) {
 		}
 
 		if (! opt.NicoRtmpOnly) {
-			done, notLogin, e := NicoRecHls(opt)
+			var done bool
+			var notLogin bool
+			done, hlsPlaylistEnd, notLogin, dbName, err = NicoRecHls(opt)
 			if done {
 				return
 			}
-			if e != nil {
-				err = e
+			if err != nil {
 				return
 			}
 			if notLogin {
@@ -261,7 +262,7 @@ func TestRun(opt options.Option) (err error) {
 		fmt.Fprintf(os.Stderr, "# NumGoroutine: %d\n", runtime.NumGoroutine())
 
 		var msg string
-		err = Record(opt)
+		_, _, err = Record(opt)
 		if err != nil {
 			if ma := regexp.MustCompile(`\AError\s+code:\s*(\S+)`).FindStringSubmatch(err.Error()); len(ma) > 0 {
 				msg = ma[1]

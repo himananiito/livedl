@@ -359,6 +359,7 @@ const (
 	INTERRUPT
 	MAIN_WS_ERROR
 	MAIN_DISCONNECT
+	MAIN_END_PROGRAM
 	MAIN_INVALID_STREAM_QUALITY
 	PLAYLIST_END
 	PLAYLIST_403
@@ -512,6 +513,10 @@ func (hls *NicoHls) checkReturnCode(code int) {
 		hls.stopPGoroutines()
 
 	case MAIN_DISCONNECT:
+		hls.stopPCGoroutines()
+
+	case MAIN_END_PROGRAM:
+		hls.finish = true
 		hls.stopPCGoroutines()
 
 	case MAIN_INVALID_STREAM_QUALITY:
@@ -1509,6 +1514,13 @@ func (hls *NicoHls) startMain() {
 						// print params
 						if arr, ok := obj.FindArray(res, "body", "params"); ok {
 							fmt.Printf("%v\n", arr)
+							if len(arr) >= 2 {
+								if s, ok := arr[1].(string); ok {
+									if s == "END_PROGRAM" {
+										return MAIN_END_PROGRAM
+									}
+								}
+							}
 						}
 						//chDone <-true
 						return MAIN_DISCONNECT
@@ -1773,7 +1785,7 @@ func getProps(opt options.Option) (props interface{}, notLogin bool, err error) 
 	return
 }
 
-func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
+func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin bool, dbName string, err error) {
 
 	//http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 32
 
@@ -1907,6 +1919,8 @@ func NicoRecHls(opt options.Option) (done, notLogin bool, err error) {
 
 	hls.Wait(opt.NicoTestTimeout, opt.NicoHlsPort)
 
+	dbName = hls.dbName
+	playlistEnd = hls.finish
 	done = true
 
 	return

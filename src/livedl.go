@@ -60,9 +60,28 @@ func main() {
 		youtube.Record(opt.YoutubeId)
 
 	case "NICOLIVE":
-		if err := niconico.Record(opt); err != nil {
+		hlsPlaylistEnd, dbname, err := niconico.Record(opt);
+		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
+		}
+		if hlsPlaylistEnd && opt.NicoAutoConvert {
+			done, nMp4s, err := zip2mp4.ConvertDB(dbname)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			if done {
+				if nMp4s == 1 {
+					if 1 <= opt.NicoAutoDeleteDBMode {
+						os.Remove(dbname)
+					}
+				} else if 1 < nMp4s {
+					if 2 <= opt.NicoAutoDeleteDBMode {
+						os.Remove(dbname)
+					}
+				}
+			}
 		}
 	case "NICOLIVE_TEST":
 		if err := niconico.TestRun(opt); err != nil {
@@ -77,7 +96,7 @@ func main() {
 		}
 
 	case "DB2MP4":
-		if err := zip2mp4.ConvertDB(opt.DBFile); err != nil {
+		if _, _, err := zip2mp4.ConvertDB(opt.DBFile); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}

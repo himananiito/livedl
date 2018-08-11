@@ -23,6 +23,7 @@ import (
 type ZipMp4 struct {
 	ZipName string
 	Mp4NameOpened string
+	mp4List []string
 
 	FFMpeg *exec.Cmd
 	FFStdin io.WriteCloser
@@ -144,6 +145,11 @@ func openMP42TS(consoleEn bool, args []string) (cmd *exec.Cmd) {
 	return
 }
 func (z *ZipMp4) Wait() {
+
+	if z.FFStdin != nil {
+		z.FFStdin.Close()
+	}
+
 	if z.FFMpeg != nil {
 		if err := z.FFMpeg.Wait(); err != nil {
 			log.Fatalln(err)
@@ -155,6 +161,9 @@ func (z *ZipMp4) CloseFFInput() {
 	z.FFStdin.Close()
 }
 func (z *ZipMp4) OpenFFMpeg() {
+	//
+	z.Wait()
+
 	name := files.ChangeExtention(z.ZipName, "mp4")
 	name, err := files.GetFileNameNext(name)
 	if err != nil {
@@ -162,6 +171,7 @@ func (z *ZipMp4) OpenFFMpeg() {
 		os.Exit(1)
 	}
 	z.Mp4NameOpened = name
+	z.mp4List = append(z.mp4List, name)
 
 	cmd, stdin, _, _ := openFFMpeg(true, false, false, true, []string{
 		"-i", "-",
@@ -419,7 +429,7 @@ func Convert(fileName string) (err error) {
 }
 
 
-func ConvertDB(fileName string) (err error) {
+func ConvertDB(fileName string) (done bool, nMp4s int, err error) {
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
 		return
@@ -431,7 +441,7 @@ func ConvertDB(fileName string) (err error) {
 	var zm *ZipMp4
 	defer func() {
 		if zm != nil {
-			zm.CloseFFInput()
+			//zm.CloseFFInput()
 			zm.Wait()
 		}
 	}()
@@ -457,6 +467,8 @@ func ConvertDB(fileName string) (err error) {
 			return
 		}
 
+		// チャンクが飛んでいる場合はファイルを分ける
+		// BANDWIDTHが変わる場合はファイルを分ける
 		if (prevIndex >= 0 && seqno != prevIndex + 1) || (prevBw >= 0 && bw != prevBw) {
 			if bw != prevBw {
 				fmt.Printf("\nBandwitdh changed: %d --> %d\n\n", prevBw, bw)
@@ -464,11 +476,10 @@ func ConvertDB(fileName string) (err error) {
 				fmt.Printf("\nSeqNo. skipped: %d --> %d\n\n", prevIndex, seqno)
 			}
 
-			if zm != nil {
-				zm.CloseFFInput()
-				zm.Wait()
-			}
-			zm = &ZipMp4{ZipName: fileName}
+			//if zm != nil {
+			//	zm.CloseFFInput()
+			//	zm.Wait()
+			//}
 			zm.OpenFFMpeg()
 		}
 		prevBw = bw
@@ -477,9 +488,14 @@ func ConvertDB(fileName string) (err error) {
 		zm.FFInput(bytes.NewBuffer(data))
 	}
 
-	zm.CloseFFInput()
+	//zm.CloseFFInput()
 	zm.Wait()
-	fmt.Printf("\nfinish: %s\n", zm.Mp4NameOpened)
+	fmt.Printf("\nfinish:\n")
+	for _, s := range zm.mp4List {
+		fmt.Println(s)
+	}
+	done = true
+	nMp4s = len(zm.mp4List)
 
 	return
 }
