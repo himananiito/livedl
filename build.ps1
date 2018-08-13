@@ -1,8 +1,17 @@
+rm livedl.exe
 go run updatebuildno.go
 go build src/livedl.go
 
+# hide local path
+perl replacelocal.pl
+
+# livedl test run(nico)
+$process = Start-Process -FilePath livedl.exe -ArgumentList '-nicotestrun -nicotesttimeout 7 -nicotestfmt "testrec/?UNAME?/?PID?-?UNAME?-?TITLE?"' -PassThru
+$process.WaitForExit(1000 * 61)
+$process.Kill()
+
 $dir = "livedl"
-$zip = "$dir.zip"
+$zip = "$dir-win64.zip"
 if(Test-Path -PathType Leaf $zip) {
 	rm $zip
 }

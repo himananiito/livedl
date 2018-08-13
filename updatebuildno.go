@@ -43,7 +43,7 @@ func main() {
 		now.Day(),
 	)
 
-	fmt.Printf("%v.%v", buildDate, buildNo)
+	fmt.Printf("%v.%v\n", buildDate, buildNo)
 
 	if _, err := f.Seek(0, 0); err != nil {
 		log.Fatal(err)

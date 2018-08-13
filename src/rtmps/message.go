@@ -84,7 +84,7 @@ func chunkBasicHeader(fmt, csid int) (data []byte) {
 		data = append(data, b0, b1, b2)
 
 	} else {
-		log.Fatalf("Chunk basic header: csid out of range: %d", csid)
+		log.Printf("[FIXME] Chunk basic header: csid out of range: %d", csid)
 	}
 
 	return

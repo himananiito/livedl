@@ -48,7 +48,16 @@ func getCmd() (cmd string) {
 	cmd = strings.TrimSuffix(cmd, ext)
 	return
 }
-
+func versionStr() string {
+	cmd := filepath.Base(os.Args[0])
+	ext := filepath.Ext(cmd)
+	cmd = strings.TrimSuffix(cmd, ext)
+	return fmt.Sprintf(`%s (%s)`, cmd, buildno.GetBuildNo())
+}
+func version() {
+	fmt.Println(versionStr())
+	os.Exit(0)
+}
 func Help() {
 	cmd := filepath.Base(os.Args[0])
 	ext := filepath.Ext(cmd)
@@ -68,6 +77,7 @@ COMMAND:
 オプション/option:
   -conf-pass <password> [廃止] 設定ファイルのパスワード
   -h                    ヘルプを表示
+  -v                    バージョンを表示
   --                    後にオプションが無いことを指定
 
 オプション/option (ニコニコ生放送/nicolive):
@@ -305,8 +315,12 @@ func ParseArgs() (opt Option) {
 	}
 
 	parseList := []Parser{
-		Parser{regexp.MustCompile(`\A(?i)[-/](?:\?|h|help)\z`), func() error {
+		Parser{regexp.MustCompile(`\A(?i)(?:--?|/)(?:\?|h|help)\z`), func() error {
 			Help()
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?(?:v|version)\z`), func() error {
+			version()
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(https?://(?:[^/]*@)?(?:[^/]*\.)*nicovideo\.jp(?::[^/]*)?/(?:[^/]*?/)*)?(lv\d+)(?:\?.*)?\z`), func() error {
@@ -518,6 +532,17 @@ func ParseArgs() (opt Option) {
 			}
 			opt.NicoFormat = s
 			dbConfSet(db, "NicoFormat", opt.NicoFormat)
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?test-?(?:format|fmt)\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			if s == "" {
+				return fmt.Errorf("--nico-test-format: null string not allowed\n", s)
+			}
+			opt.NicoFormat = s
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?login\z`), func() (err error) {
