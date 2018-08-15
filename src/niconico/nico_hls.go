@@ -1018,7 +1018,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 		// #CURRENT-POSITION:0.0
 		// #DMC-CURRENT-POSITION:0.0
 		var currentPos float64
-		if ma := regexp.MustCompile(`#(?:DMC-)?CURRENT-POSITION:(\d+(?:\.\d+))?`).
+		if ma := regexp.MustCompile(`#(?:DMC-)?CURRENT-POSITION:([\+\-]?\d+(?:\.\d+)?(?:[eE][\+\-]?\d+)?)`).
 			FindStringSubmatch(m3u8); len(ma) > 0 {
 			if hls.isTimeshift {
 				n, err := strconv.ParseFloat(ma[1], 64)
@@ -1048,7 +1048,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 		hls.playlist.seqNo = seqStart
 		hls.playlist.m3u8ms = (end - start) / (1000 * 1000)
 
-		re := regexp.MustCompile(`#EXTINF:(\d+(?:\.\d+)?)[^\n]*\n(\S+)`)
+		re := regexp.MustCompile(`#EXTINF:([\+\-]?\d+(?:\.\d+)?(?:[eE][\+\-]?\d+)?)[^\n]*\n(\S+)`)
 		ma := re.FindAllStringSubmatch(m3u8, -1)
 
 		if len(ma) == 0 {
