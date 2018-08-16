@@ -15,6 +15,8 @@ import (
 	"../cryptoconf"
 	"../files"
 )
+var DefaultTcasRetryTimeoutMinute = 5 // TcasRetryTimeoutMinute
+var DefaultTcasRetryInterval = 60 // TcasRetryInterval
 
 type Option struct {
 	Command string
@@ -29,6 +31,9 @@ type Option struct {
 	NicoLoginOnly bool
 	NicoTestTimeout int
 	TcasId string
+	TcasRetry bool
+	TcasRetryTimeoutMinute int // 再試行を終了する時間(初回終了または録画終了からの時間「分」)
+	TcasRetryInterval int // 再試行を行うまでの待ち時間
 	YoutubeId string
 	ConfFile string // deprecated
 	ConfPass string // deprecated
@@ -80,7 +85,7 @@ COMMAND:
   -v                    バージョンを表示
   --                    後にオプションが無いことを指定
 
-オプション/option (ニコニコ生放送/nicolive):
+ニコニコ生放送録画用オプション:
   -nico-login <id>,<password>    (+) ニコニコのIDとパスワードを指定する
   -nico-session <session>        Cookie[user_session]を指定する
   -nico-login-only               非ログインで視聴可能の番組でも必ずログイン状態で録画する
@@ -104,6 +109,12 @@ COMMAND:
   -nico-auto-delete-mode 1       (+) 自動変換でMP4が分割されなかった場合のみ削除するように設定
   -nico-auto-delete-mode 2       (+) 自動変換でMP4が分割されても削除するように設定
 
+ツイキャス録画用オプション
+  -tcas-retry=on                 (+) 録画終了後に再試行を行う
+  -tcas-retry=off                (+) 録画終了後に再試行を行わない
+  -tcas-retry-timeout            (+) 再試行を開始してから終了するまでの時間（分)
+                                     -1で無限ループ。デフォルト: 5分
+  -tcas-retry-interval           (+) 再試行を行う間隔（秒）デフォルト: 60秒
 
 (+)のついたオプションは、次回も同じ設定が使用されることを示す。
 
@@ -275,7 +286,10 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "NicoFastTs"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoLoginAlias"), ""),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoAutoConvert"), 0),
-		IFNULL((SELECT v FROM conf WHERE k == "NicoAutoDeleteDBMode"), 0)
+		IFNULL((SELECT v FROM conf WHERE k == "NicoAutoDeleteDBMode"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "TcasRetry"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryTimeoutMinute"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryInterval"), 0)
 	`).Scan(
 		&opt.NicoFormat,
 		&opt.NicoLimitBw,
@@ -285,6 +299,9 @@ func ParseArgs() (opt Option) {
 		&opt.NicoLoginAlias,
 		&opt.NicoAutoConvert,
 		&opt.NicoAutoDeleteDBMode,
+		&opt.TcasRetry,
+		&opt.TcasRetryTimeoutMinute,
+		&opt.TcasRetryInterval,
 	)
 	if err != nil {
 		log.Println(err)
@@ -347,6 +364,45 @@ func ParseArgs() (opt Option) {
 		Parser{regexp.MustCompile(`\Ahttps?://twitcasting\.tv/([^/]+)(?:/.*)?\z`), func() error {
 			opt.TcasId = match[1]
 			opt.Command = "TWITCAS"
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?tcas-?retry(?:=(on|off))\z`), func() error {
+			if strings.EqualFold(match[1], "on") {
+				opt.TcasRetry = true
+			} else if strings.EqualFold(match[1], "off") {
+				opt.TcasRetry = false
+			}
+			dbConfSet(db, "TcasRetry", opt.TcasRetry)
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?tcas-?retry-?timeout(?:-?minutes?)?\z`), func() error {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--tcas-retry-timeout: Not a number: %s\n", s)
+			}
+			opt.TcasRetryTimeoutMinute = num
+			dbConfSet(db, "TcasRetryTimeoutMinute", opt.TcasRetryTimeoutMinute)
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?tcas-?retry-?interval\z`), func() error {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--tcas-retry-interval: Not a number: %s\n", s)
+			}
+			if num <= 0 {
+				return fmt.Errorf("--tcas-retry-interval: Invalid: %d: greater than 1\n", num)
+			}
+
+			opt.TcasRetryInterval = num
+			dbConfSet(db, "TcasRetryInterval", opt.TcasRetryInterval)
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\Ahttps?://(?:[^/]*\.)*youtube\.com/(?:.*\W)?v=([\w-]+)(?:[^\w-].*)?\z`), func() error {
@@ -645,6 +701,10 @@ func ParseArgs() (opt Option) {
 				return true
 			}
 		case "TWITCAS":
+			if opt.TcasId != "" {
+				fmt.Printf("Unknown option: %s\n", arg)
+				Help()
+			}
 			if ma := regexp.MustCompile(`(?:.*/)?([^/]+)\z`).FindStringSubmatch(arg); len(ma) > 0 {
 				opt.TcasId = ma[1]
 				return true
@@ -720,6 +780,23 @@ func ParseArgs() (opt Option) {
 		}
 	}
 
+
+	// prints
+	if opt.Command == "NICOLIVE" {
+		fmt.Printf("Conf(NicoFormat): %#v\n", opt.NicoFormat)
+		fmt.Printf("Conf(NicoLimitBw): %#v\n", opt.NicoLimitBw)
+		fmt.Printf("Conf(NicoHlsOnly): %#v\n", opt.NicoHlsOnly)
+		fmt.Printf("Conf(NicoRtmpOnly): %#v\n", opt.NicoRtmpOnly)
+		fmt.Printf("Conf(NicoFastTs): %#v\n", opt.NicoFastTs)
+		fmt.Printf("Conf(NicoAutoConvert): %#v\n", opt.NicoAutoConvert)
+		fmt.Printf("Conf(NicoAutoDeleteDBMode): %#v\n", opt.NicoAutoDeleteDBMode)
+	} else if opt.Command == "TWITCAS" {
+		fmt.Printf("Conf(TcasRetry): %#v\n", opt.TcasRetry)
+		fmt.Printf("Conf(TcasRetryTimeoutMinute): %#v\n", opt.TcasRetryTimeoutMinute)
+		fmt.Printf("Conf(TcasRetryInterval): %#v\n", opt.TcasRetryInterval)
+	}
+
+	// check
 	switch opt.Command {
 	case "":
 		fmt.Printf("Command not specified\n")
@@ -748,17 +825,6 @@ func ParseArgs() (opt Option) {
 	default:
 		fmt.Printf("[FIXME] options.go/argcheck for %s\n", opt.Command)
 		os.Exit(1)
-	}
-
-	// prints
-	if opt.Command == "NICOLIVE" {
-		fmt.Printf("Conf(NicoFormat): %#v\n", opt.NicoFormat)
-		fmt.Printf("Conf(NicoLimitBw): %#v\n", opt.NicoLimitBw)
-		fmt.Printf("Conf(NicoHlsOnly): %#v\n", opt.NicoHlsOnly)
-		fmt.Printf("Conf(NicoRtmpOnly): %#v\n", opt.NicoRtmpOnly)
-		fmt.Printf("Conf(NicoFastTs): %#v\n", opt.NicoFastTs)
-		fmt.Printf("Conf(NicoAutoConvert): %#v\n", opt.NicoAutoConvert)
-		fmt.Printf("Conf(NicoAutoDeleteDBMode): %#v\n", opt.NicoAutoDeleteDBMode)
 	}
 
 	return

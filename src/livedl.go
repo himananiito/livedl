@@ -10,6 +10,7 @@ import (
 	"./niconico"
 	"./youtube"
 	"./zip2mp4"
+	"time"
 )
 
 func main() {
@@ -54,7 +55,51 @@ func main() {
 		os.Exit(1)
 
 	case "TWITCAS":
-		twitcas.TwitcasRecord(opt.TcasId, "")
+		var doneTime int64
+		for {
+			done, dbLocked := twitcas.TwitcasRecord(opt.TcasId, "")
+			if dbLocked {
+				break
+			}
+			if (! opt.TcasRetry) {
+				break
+			}
+
+			if opt.TcasRetryTimeoutMinute < 0 {
+
+			} else if done {
+				doneTime = time.Now().Unix()
+
+			} else {
+				if doneTime == 0 {
+					doneTime = time.Now().Unix()
+				} else {
+					delta := time.Now().Unix() - doneTime
+					var minutes int
+					if opt.TcasRetryTimeoutMinute == 0 {
+						minutes = options.DefaultTcasRetryTimeoutMinute
+					} else {
+						minutes = opt.TcasRetryTimeoutMinute
+					}
+
+					if minutes > 0 {
+						if delta > int64(minutes * 60) {
+							break
+						}
+					}
+				}
+			}
+
+			var interval int
+			if interval <= 0 {
+				interval = options.DefaultTcasRetryInterval
+			} else {
+				interval = opt.TcasRetryInterval
+			}
+			select {
+			case <-time.After(time.Duration(interval) * time.Second):
+			}
+		}
 
 	case "YOUTUBE":
 		youtube.Record(opt.YoutubeId)

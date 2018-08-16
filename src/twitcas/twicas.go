@@ -9,7 +9,8 @@ import (
 	"net/url"
 	"os"
 	"time"
-
+	"database/sql"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/gorilla/websocket"
 	"../files"
 	"../httpbase"
@@ -21,9 +22,11 @@ type Twitcas struct {
 
 func connectStream(proto, host, mode string, id uint64, proxy string) (conn *websocket.Conn, err error) {
 	streamUrl := fmt.Sprintf(
-		"%s://%s/ws.app/stream/%d/fmp4/k/0/1?mode=%s",
+		//"%s://%s/ws.app/stream/%d/fmp4/k/0/1?mode=%s",
+		"%s://%s/ws.app/stream/%d/fmp4/bd/1/1500?mode=%s",
 		proto, host, id, mode,
 	)
+	// fmt.Println(streamUrl)
 
 	var origin string
 	if proto == "wss" {
@@ -92,8 +95,7 @@ func getStream(user, proxy string) (conn *websocket.Conn, movieId uint64, err er
 	if err != nil {
 		return
 	}
-	//respStr := string(respBytes)
-	//fmt.Printf("@respStr %v\n", respStr)
+	//fmt.Printf("debug %s\n", string(respBytes))
 
 	data := new(StreamServer)
 
@@ -104,11 +106,7 @@ func getStream(user, proxy string) (conn *websocket.Conn, movieId uint64, err er
 
 	if !data.Movie.Live {
 		// movie not active
-		if data.Movie.Id == 0 {
-			err = errors.New(user + " --> " + "User Not Found")
-		} else {
-			err = errors.New(user + " --> " + "Offline")
-		}
+		err = errors.New(user + " --> " + "Offline or User Not Found")
 		return
 	} else {
 		var mode string
@@ -150,33 +148,50 @@ func createFileUser(user string, movieId uint64) (f *os.File, filename string, e
 }
 
 // FIXME: return codeの整理
-func TwitcasRecord(user, proxy string) int {
+func TwitcasRecord(user, proxy string) (done, dbLocked bool) {
 	conn, movieId, err := getStream(user, proxy)
 	if err != nil {
 		fmt.Printf("@err %v\n", err)
-		return 1
+		return
 	}
 	defer conn.Close()
+
+	dbName := fmt.Sprintf("tmp/tcas-%v-lock.db", movieId)
+	files.MkdirByFileName(dbName)
+	db, err := sql.Open("sqlite3", dbName)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`BEGIN EXCLUSIVE`)
+	if err != nil {
+		dbLocked = true
+		return
+	}
+	defer os.Remove(dbName)
 
 	var file *os.File
 	var fileOpened bool
 	var filename string
+	var printTime int64
 	for {
 		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		messageType, data, err := conn.ReadMessage()
 		if err != nil {
 			fmt.Printf("@err %v\n\n", err)
-			return 9
+			return
 		}
 
 		if messageType == 2 {
-			wlen, err := file.Write(data)
+			_, err := file.Write(data)
 			if err != nil {
 				if ! fileOpened {
 					file, filename, err = createFileUser(user, movieId)
 					if err != nil {
 						fmt.Printf("@err %v\n\n", err)
-						return 2
+						return
 					}
 					defer file.Close()
 					fileOpened = true
@@ -186,15 +201,21 @@ func TwitcasRecord(user, proxy string) int {
 					_, err = file.Write(data)
 					if err != nil {
 						fmt.Printf("@err %v\n", err)
-						return 3
+						return
 					}
 				} else {
 					// write error
 					fmt.Printf("@err %v\n", err)
-					return 8
+					return
 				}
 			}
-			fmt.Printf("@Wrote %s --> %d bytes\n", filename, wlen)
+			now := time.Now().Unix()
+			if now - printTime > 5 {
+				printTime = now
+				if info, err := file.Stat(); err == nil {
+					fmt.Printf("@Wrote %s: %d bytes\n", filename, info.Size())
+				}
+			}
 
 		} else if messageType == 1 {
 
@@ -206,27 +227,28 @@ func TwitcasRecord(user, proxy string) int {
 			if err != nil {
 				// json decode error
 				fmt.Printf("@err %v\n", err)
-				return 7
+				return
 			}
 			if (msg.Code == 100) || (msg.Code == 101) || (msg.Code == 110) {
 				// ignore
 			} else if msg.Code == 400 { // invalid_parameter
-				return 400
+				return
 			} else if msg.Code == 401 { // passcode_required
-				return 401
+				return
 			} else if msg.Code == 403 { //access_forbidden
-				return 403
+				return
 			} else if msg.Code == 500 { // offline
-				return 500
+				return
 			} else if msg.Code == 503 { // server_error
-				return 503
+				return
 			} else if msg.Code == 504 { // live_ended
 				break
 			} else {
 				fmt.Printf("@FIXME %v\n\n", string(data))
-				return 999
+				return
 			}
 		}
 	}
-	return 0
+	done = fileOpened
+	return
 }
