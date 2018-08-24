@@ -13,8 +13,9 @@ import (
 )
 
 var SelMedia = `SELECT
-	bandwidth, seqno, size, data FROM media
-	WHERE data IS NOT NULL ORDER BY seqno`
+	seqno, bandwidth, size, data FROM media
+	WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL
+	ORDER BY seqno`
 
 var SelComment = `SELECT
 	vpos,
@@ -43,6 +44,7 @@ func (hls *NicoHls) dbCreate() (err error) {
 	CREATE TABLE IF NOT EXISTS media (
 		seqno     INTEGER PRIMARY KEY NOT NULL UNIQUE,
 		current   INTEGER,
+		m3u8time  INTEGER,
 		position  REAL,
 		notfound  INTEGER,
 		noback    INTEGER,
@@ -132,10 +134,14 @@ func (hls *NicoHls) dbCreate() (err error) {
 
 //
 
-func (hls *NicoHls) dbCheckSequence(seqno int) (res bool) {
+func (hls *NicoHls) dbCheckSequence(seqno int, checkNotFound bool) (res bool) {
 	hls.dbMtx.Lock()
 	defer hls.dbMtx.Unlock()
-	hls.db.QueryRow("SELECT size IS NOT NULL OR notfound <> 0 FROM media WHERE seqno=?", seqno).Scan(&res)
+	if checkNotFound {
+		hls.db.QueryRow("SELECT size IS NOT NULL OR notfound <> 0 FROM media WHERE seqno=?", seqno).Scan(&res)
+	} else {
+		hls.db.QueryRow("SELECT size IS NOT NULL FROM media WHERE seqno=?", seqno).Scan(&res)
+	}
 	return
 }
 func (hls *NicoHls) dbCheckBack(seqno int) (res bool) {
@@ -196,6 +202,9 @@ func (hls *NicoHls) __dbBegin() {
 func (hls *NicoHls) __dbCommit(t time.Time) {
 	// Never hls.dbMtx.Lock()
 	hls.db.Exec(`COMMIT; BEGIN TRANSACTION`)
+	if t.UnixNano() - hls.lastCommit.UnixNano() > 200000000 {
+		log.Printf("Commit: %s\n", hls.dbName)
+	}
 	hls.lastCommit = t
 }
 func (hls *NicoHls) dbCommit() {
@@ -219,7 +228,6 @@ func (hls *NicoHls) dbExec(query string, args ...interface{}) {
 
 	now := time.Now()
 	if now.After(hls.lastCommit.Add(15 * time.Second)) {
-		log.Printf("Commit: %s\n", hls.dbName)
 		hls.__dbCommit(now)
 	}
 }
@@ -229,7 +237,7 @@ func (hls *NicoHls) dbKVSet(k string, v interface{}) {
 	hls.dbExec(query, k, v)
 }
 
-func (hls *NicoHls) dbInsert(table string, data map[string]interface{}) {
+func (hls *NicoHls) dbInsertReplaceOrIgnore(table string, data map[string]interface{}, replace bool) {
 	var keys []string
 	var qs []string
 	var args []interface{}
@@ -239,8 +247,17 @@ func (hls *NicoHls) dbInsert(table string, data map[string]interface{}) {
 		qs = append(qs, "?")
 		args = append(args, v)
 	}
+
+	var replaceOrIgnore string
+	if replace {
+		replaceOrIgnore = "REPLACE"
+	} else {
+		replaceOrIgnore = "IGNORE"
+	}
+
 	query := fmt.Sprintf(
-		`INSERT OR IGNORE INTO %s (%s) VALUES (%s)`,
+		`INSERT OR %s INTO %s (%s) VALUES (%s)`,
+		replaceOrIgnore,
 		table,
 		strings.Join(keys, ","),
 		strings.Join(qs, ","),
@@ -248,6 +265,14 @@ func (hls *NicoHls) dbInsert(table string, data map[string]interface{}) {
 
 	hls.dbExec(query, args...)
 }
+
+func (hls *NicoHls) dbInsert(table string, data map[string]interface{}) {
+	hls.dbInsertReplaceOrIgnore(table, data, false)
+}
+func (hls *NicoHls) dbReplace(table string, data map[string]interface{}) {
+	hls.dbInsertReplaceOrIgnore(table, data, true)
+}
+
 
 func (hls *NicoHls) dbGetFromWhen() (res_from int, when float64) {
 	hls.dbMtx.Lock()

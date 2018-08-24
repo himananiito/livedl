@@ -92,6 +92,8 @@ type NicoHls struct {
 
 	NicoSession string
 	limitBw int
+
+	nicoDebug bool
 }
 func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err error) {
 
@@ -216,6 +218,7 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 
 		NicoSession: opt.NicoSession,
 		limitBw: opt.NicoLimitBw,
+		nicoDebug: opt.NicoDebug,
 	}
 
 	for i := 0; i < 2 ; i++ {
@@ -243,16 +246,11 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 	return
 }
 func (hls *NicoHls) Close() {
-	hls.finalize()
+	hls.dbCommit()
 	if hls.db != nil {
 		hls.db.Close()
 	}
 }
-func (hls *NicoHls) finalize() {
-	//fmt.Println("finalizing")
-	hls.dbCommit()
-}
-
 
 // Comment method
 
@@ -554,9 +552,9 @@ func (hls *NicoHls) startGoroutine2(start_t int, f func(chan struct{}) int) {
 
 	stopChan := make(chan struct{}, 10)
 
-	if runtime.NumGoroutine() > 100 {
-		log.Fatalln("too many goroutines")
-	}
+	//if runtime.NumGoroutine() > 100 {
+	//	log.Fatalln("too many goroutines")
+	//}
 
 	go func(start_t int){
 		//fmt.Printf("goroutine started: %d\n", start_t)
@@ -938,7 +936,7 @@ func getBytes(uri string) (code int, buff []byte, start, tresp, end int64, err, 
 	return
 }
 
-func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr, err error) {
+func (hls *NicoHls) saveMedia(seqno int, uri, m3u8 string, endNano int64) (is403, is404 bool, neterr, err error) {
 //fmt.Printf("saveMedia %v %v\n", seqno, uri)
 
 	code, buff, start, tresp, end, err, neterr := getBytes(uri)
@@ -951,11 +949,17 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr,
 		is403 = true
 		return
 	case 404:
-		hls.dbInsert("media", map[string]interface{}{
+		data := map[string]interface{}{
 			"seqno": seqno,
 			"current": hls.playlist.seqNo,
 			"notfound": 1,
-		})
+			"m3u8time": endNano / 1000000000, // 180822 add
+		}
+		if hls.nicoDebug {
+			// may included my user id
+			data["data"] = m3u8
+		}
+		hls.dbInsert("media", data)
 		is404 = true
 		return
 	}
@@ -968,6 +972,7 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr,
 		"hdrms": ((tresp - start) / (1000 * 1000)),
 		"chunkms": ((end - start) / (1000 * 1000)),
 		"data": buff,
+		"m3u8time": endNano / 1000000000, // 180822 add
 	}
 
 	if seqno == hls.playlist.seqNo {
@@ -978,7 +983,7 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr,
 		}
 	}
 
-	hls.dbInsert("media", data)
+	hls.dbReplace("media", data)
 
 	return
 }
@@ -1007,7 +1012,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 		return
 	}
 
-	end := time.Now().UnixNano()
+	endNano := time.Now().UnixNano()
 
 	re := regexp.MustCompile(`#EXT-X-MEDIA-SEQUENCE:(\d+)`)
 	ma := re.FindStringSubmatch(m3u8)
@@ -1021,9 +1026,10 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 		if ma := regexp.MustCompile(`#(?:DMC-)?CURRENT-POSITION:([\+\-]?\d+(?:\.\d+)?(?:[eE][\+\-]?\d+)?)`).
 			FindStringSubmatch(m3u8); len(ma) > 0 {
 			if hls.isTimeshift {
-				n, err := strconv.ParseFloat(ma[1], 64)
-				if err != nil {
-					log.Fatalln(err)
+				n, e := strconv.ParseFloat(ma[1], 64)
+				if e != nil {
+					err = e
+					return
 				}
 				currentPos = n
 				hls.playlist.position = currentPos
@@ -1046,7 +1052,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 			log.Fatal(err)
 		}
 		hls.playlist.seqNo = seqStart
-		hls.playlist.m3u8ms = (end - start) / (1000 * 1000)
+		hls.playlist.m3u8ms = (endNano - start) / (1000 * 1000)
 
 		re := regexp.MustCompile(`#EXTINF:([\+\-]?\d+(?:\.\d+)?(?:[eE][\+\-]?\d+)?)[^\n]*\n(\S+)`)
 		ma := re.FindAllStringSubmatch(m3u8, -1)
@@ -1072,9 +1078,10 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 			}
 
 			if hls.isTimeshift || i == 0 {
-				d, err := strconv.ParseFloat(a[1], 64)
-				if err != nil {
-					log.Fatalln(err)
+				d, e := strconv.ParseFloat(a[1], 64)
+				if e != nil {
+					err = e
+					return
 				}
 
 				if hls.isTimeshift {
@@ -1089,9 +1096,10 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 				}
 			}
 
-			uri, err := urlJoin(argUri, a[2])
-			if err != nil {
-				log.Fatalln(err)
+			uri, e := urlJoin(argUri, a[2])
+			if e != nil {
+				err = e
+				return
 			}
 
 			seqlist = append(seqlist, seq_t{
@@ -1149,13 +1157,13 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 				if hls.dbCheckBack(i) {
 					hls.dbMarkNoBack(hls.playlist.seqNo - 1)
 					break
-				} else if hls.dbCheckSequence(i) {
+				} else if hls.dbCheckSequence(i, true) {
 					continue
 				}
 
 				u := fmt.Sprintf(hls.playlist.format, i)
 				var is404 bool
-				is403, is404, neterr, err = hls.saveMedia(i, u)
+				is403, is404, neterr, err = hls.saveMedia(i, u, m3u8, endNano)
 				if neterr != nil || err != nil {
 					return
 				}
@@ -1171,7 +1179,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 
 		// m3u8の通りにチャンクを取得する
 		for _, seq := range seqlist {
-			if hls.dbCheckSequence(seq.seqno) {
+			if hls.dbCheckSequence(seq.seqno, false) {
 				if seq.seqno == hls.playlist.seqNo {
 					hls.dbSetM3u8ms()
 
@@ -1183,7 +1191,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 			}
 
 			var is404 bool
-			is403, is404, neterr, err = hls.saveMedia(seq.seqno, seq.uri)
+			is403, is404, neterr, err = hls.saveMedia(seq.seqno, seq.uri, m3u8, endNano)
 			if neterr != nil || err != nil {
 				return
 			}
@@ -1243,7 +1251,8 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 				}
 			}
 			if uri == nil {
-				log.Fatalln("playlist uri not defined")
+				err = fmt.Errorf("playlist uri not defined")
+				return
 			}
 
 			fmt.Printf("BANDWIDTH: %d\n", maxBw)
@@ -1707,8 +1716,6 @@ func (hls *NicoHls) Wait(testTimeout, hlsPort int) {
 		hls.stopPCGoroutines()
 		hls.waitCGoroutines()
 	}
-
-	hls.finalize()
 
 	hls.stopAllGoroutines()
 	hls.waitAllGoroutines()

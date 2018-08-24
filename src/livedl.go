@@ -111,7 +111,7 @@ func main() {
 			os.Exit(1)
 		}
 		if hlsPlaylistEnd && opt.NicoAutoConvert {
-			done, nMp4s, err := zip2mp4.ConvertDB(dbname)
+			done, nMp4s, err := zip2mp4.ConvertDB(dbname, opt.ConvExt)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
@@ -141,7 +141,7 @@ func main() {
 		}
 
 	case "DB2MP4":
-		if _, _, err := zip2mp4.ConvertDB(opt.DBFile); err != nil {
+		if _, _, err := zip2mp4.ConvertDB(opt.DBFile, opt.ConvExt); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}

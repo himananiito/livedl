@@ -160,11 +160,14 @@ func (z *ZipMp4) Wait() {
 func (z *ZipMp4) CloseFFInput() {
 	z.FFStdin.Close()
 }
-func (z *ZipMp4) OpenFFMpeg() {
+func (z *ZipMp4) OpenFFMpeg(ext string) {
 	//
 	z.Wait()
 
-	name := files.ChangeExtention(z.ZipName, "mp4")
+	if ext == "" {
+		ext = "mp4"
+	}
+	name := files.ChangeExtention(z.ZipName, ext)
 	name, err := files.GetFileNameNext(name)
 	if err != nil {
 		fmt.Println(err)
@@ -176,6 +179,7 @@ func (z *ZipMp4) OpenFFMpeg() {
 	cmd, stdin, _, _ := openFFMpeg(true, false, false, true, []string{
 		"-i", "-",
 		"-c", "copy",
+		//"-movflags", "faststart", // test
 		"-y",
 		name,
 	})
@@ -324,7 +328,7 @@ func Convert(fileName string) (err error) {
 	}()
 
 	zm = &ZipMp4{ZipName: fileName}
-	zm.OpenFFMpeg()
+	zm.OpenFFMpeg("mp4")
 
 	prevIndex := int64(-1)
 	for _, key := range keys {
@@ -339,7 +343,7 @@ func Convert(fileName string) (err error) {
 					zm.Wait()
 				}
 				zm = &ZipMp4{ZipName: fileName}
-				zm.OpenFFMpeg()
+				zm.OpenFFMpeg("mp4")
 			}
 		}
 		prevIndex = key
@@ -416,7 +420,7 @@ func Convert(fileName string) (err error) {
 						zm.Wait()
 					}
 					zm = &ZipMp4{ZipName: fileName}
-					zm.OpenFFMpeg()
+					zm.OpenFFMpeg("mp4")
 			}
 		}
 	}
@@ -429,7 +433,7 @@ func Convert(fileName string) (err error) {
 }
 
 
-func ConvertDB(fileName string) (done bool, nMp4s int, err error) {
+func ConvertDB(fileName, ext string) (done bool, nMp4s int, err error) {
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
 		return
@@ -447,7 +451,7 @@ func ConvertDB(fileName string) (done bool, nMp4s int, err error) {
 	}()
 
 	zm = &ZipMp4{ZipName: fileName}
-	zm.OpenFFMpeg()
+	zm.OpenFFMpeg(ext)
 
 	rows, err := db.Query(niconico.SelMedia)
 	if err != nil {
@@ -458,15 +462,14 @@ func ConvertDB(fileName string) (done bool, nMp4s int, err error) {
 	prevBw := -1
 	prevIndex := int64(-1)
 	for rows.Next() {
-		var bw int
 		var seqno int64
+		var bw int
 		var size int
 		var data []byte
-		err = rows.Scan(&bw, &seqno, &size, &data)
+		err = rows.Scan(&seqno, &bw, &size, &data)
 		if err != nil {
 			return
 		}
-
 		// チャンクが飛んでいる場合はファイルを分ける
 		// BANDWIDTHが変わる場合はファイルを分ける
 		if (prevIndex >= 0 && seqno != prevIndex + 1) || (prevBw >= 0 && bw != prevBw) {
@@ -480,7 +483,7 @@ func ConvertDB(fileName string) (done bool, nMp4s int, err error) {
 			//	zm.CloseFFInput()
 			//	zm.Wait()
 			//}
-			zm.OpenFFMpeg()
+			zm.OpenFFMpeg(ext)
 		}
 		prevBw = bw
 		prevIndex = seqno

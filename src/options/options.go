@@ -46,6 +46,8 @@ type Option struct {
 	NicoUltraFastTs bool
 	NicoAutoConvert bool
 	NicoAutoDeleteDBMode int // 0:削除しない 1:mp4が分割されなかったら削除 2:分割されても削除
+	NicoDebug bool // デバッグ情報の記録
+	ConvExt string
 }
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
@@ -115,6 +117,10 @@ COMMAND:
   -tcas-retry-timeout            (+) 再試行を開始してから終了するまでの時間（分)
                                      -1で無限ループ。デフォルト: 5分
   -tcas-retry-interval           (+) 再試行を行う間隔（秒）デフォルト: 60秒
+
+変換オプション
+  -conv-ext=mp4                  (+) -d2mで出力の拡張子を.mp4とする(デフォルト)
+  -conv-ext=ts                   (+) -d2mで出力の拡張子を.tsとする
 
 (+)のついたオプションは、次回も同じ設定が使用されることを示す。
 
@@ -289,7 +295,8 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "NicoAutoDeleteDBMode"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "TcasRetry"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryTimeoutMinute"), 0),
-		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryInterval"), 0)
+		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryInterval"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "ConvExt"), "")
 	`).Scan(
 		&opt.NicoFormat,
 		&opt.NicoLimitBw,
@@ -302,6 +309,7 @@ func ParseArgs() (opt Option) {
 		&opt.TcasRetry,
 		&opt.TcasRetryTimeoutMinute,
 		&opt.TcasRetryInterval,
+		&opt.ConvExt,
 	)
 	if err != nil {
 		log.Println(err)
@@ -657,6 +665,10 @@ func ParseArgs() (opt Option) {
 			opt.NicoRtmpMaxConn = num
 			return
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?debug\z`), func() error {
+			opt.NicoDebug = true
+			return nil
+		}},
 		Parser{regexp.MustCompile(`\A(?i).+\.zip\z`), func() (err error) {
 			switch opt.Command {
 			case "", "ZIP2MP4":
@@ -676,6 +688,15 @@ func ParseArgs() (opt Option) {
 				return fmt.Errorf("%s: Use -- option before \"%s\"", opt.Command, match[0])
 			}
 			return
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?conv-?ext(?:=(mp4|ts))\z`), func() error {
+			if strings.EqualFold(match[1], "mp4") {
+				opt.ConvExt = "mp4"
+			} else if strings.EqualFold(match[1], "ts") {
+				opt.ConvExt = "ts"
+			}
+			dbConfSet(db, "ConvExt", opt.ConvExt)
+			return nil
 		}},
 	}
 
@@ -782,7 +803,8 @@ func ParseArgs() (opt Option) {
 
 
 	// prints
-	if opt.Command == "NICOLIVE" {
+	switch opt.Command {
+	case "NICOLIVE":
 		fmt.Printf("Conf(NicoFormat): %#v\n", opt.NicoFormat)
 		fmt.Printf("Conf(NicoLimitBw): %#v\n", opt.NicoLimitBw)
 		fmt.Printf("Conf(NicoHlsOnly): %#v\n", opt.NicoHlsOnly)
@@ -790,10 +812,12 @@ func ParseArgs() (opt Option) {
 		fmt.Printf("Conf(NicoFastTs): %#v\n", opt.NicoFastTs)
 		fmt.Printf("Conf(NicoAutoConvert): %#v\n", opt.NicoAutoConvert)
 		fmt.Printf("Conf(NicoAutoDeleteDBMode): %#v\n", opt.NicoAutoDeleteDBMode)
-	} else if opt.Command == "TWITCAS" {
+	case "TWITCAS":
 		fmt.Printf("Conf(TcasRetry): %#v\n", opt.TcasRetry)
 		fmt.Printf("Conf(TcasRetryTimeoutMinute): %#v\n", opt.TcasRetryTimeoutMinute)
 		fmt.Printf("Conf(TcasRetryInterval): %#v\n", opt.TcasRetryInterval)
+	case "DB2MP4":
+		fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
 	}
 
 	// check
