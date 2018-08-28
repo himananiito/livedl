@@ -811,7 +811,11 @@ func ParseArgs() (opt Option) {
 		fmt.Printf("Conf(NicoRtmpOnly): %#v\n", opt.NicoRtmpOnly)
 		fmt.Printf("Conf(NicoFastTs): %#v\n", opt.NicoFastTs)
 		fmt.Printf("Conf(NicoAutoConvert): %#v\n", opt.NicoAutoConvert)
-		fmt.Printf("Conf(NicoAutoDeleteDBMode): %#v\n", opt.NicoAutoDeleteDBMode)
+		if opt.NicoAutoConvert {
+			fmt.Printf("Conf(NicoAutoDeleteDBMode): %#v\n", opt.NicoAutoDeleteDBMode)
+			fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
+		}
+
 	case "TWITCAS":
 		fmt.Printf("Conf(TcasRetry): %#v\n", opt.TcasRetry)
 		fmt.Printf("Conf(TcasRetryTimeoutMinute): %#v\n", opt.TcasRetryTimeoutMinute)
