@@ -936,7 +936,7 @@ func getBytes(uri string) (code int, buff []byte, start, tresp, end int64, err, 
 	return
 }
 
-func (hls *NicoHls) saveMedia(seqno int, uri, m3u8 string, endNano int64) (is403, is404 bool, neterr, err error) {
+func (hls *NicoHls) saveMedia(seqno int, uri string, endNano int64) (is403, is404 bool, neterr, err error) {
 //fmt.Printf("saveMedia %v %v\n", seqno, uri)
 
 	code, buff, start, tresp, end, err, neterr := getBytes(uri)
@@ -954,10 +954,6 @@ func (hls *NicoHls) saveMedia(seqno int, uri, m3u8 string, endNano int64) (is403
 			"current": hls.playlist.seqNo,
 			"notfound": 1,
 			"m3u8time": endNano / 1000000000, // 180822 add
-		}
-		if hls.nicoDebug {
-			// may included my user id
-			data["data"] = m3u8
 		}
 		hls.dbInsert("media", data)
 		is404 = true
@@ -988,11 +984,14 @@ func (hls *NicoHls) saveMedia(seqno int, uri, m3u8 string, endNano int64) (is403
 	return
 }
 
-func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, neterr, err error) {
+func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, neterr, err error) {
 
 	start := time.Now().UnixNano()
 
 	m3u8, code, err, neterr := getString(argUri.String())
+	if hls.nicoDebug {
+		log.Printf("%s:getPlaylist/getString: code=%v, err=%v, neterr=%v\n>>>%s<<<\n", time.Now(), code, err, neterr, m3u8)
+	}
 	if err != nil || neterr != nil {
 		return
 	}
@@ -1054,6 +1053,10 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 		hls.playlist.seqNo = seqStart
 		hls.playlist.m3u8ms = (endNano - start) / (1000 * 1000)
 
+		if hls.nicoDebug {
+			fmt.Printf("%v:getPlaylist/getString: seqNo=%v, m3u8ms=%v(ms)\n", time.Now(), hls.playlist.seqNo, hls.playlist.m3u8ms)
+		}
+
 		re := regexp.MustCompile(`#EXTINF:([\+\-]?\d+(?:\.\d+)?(?:[eE][\+\-]?\d+)?)[^\n]*\n(\S+)`)
 		ma := re.FindAllStringSubmatch(m3u8, -1)
 
@@ -1090,7 +1093,13 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 
 				if i == 0 {
 					if (! hls.isTimeshift) || (! hls.fastTimeshift) {
-						t := time.Duration(float64(time.Second) * (d + 0.5))
+						if d > 3 {
+							fmt.Printf("debug: found EXTINF=%v\n", d)
+							d = 2.0
+						} else {
+							d = d + 0.5
+						}
+						t := time.Duration(float64(time.Second) * d)
 						hls.playlist.nextTime = time.Now().Add(t)
 					}
 				}
@@ -1163,7 +1172,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 
 				u := fmt.Sprintf(hls.playlist.format, i)
 				var is404 bool
-				is403, is404, neterr, err = hls.saveMedia(i, u, m3u8, endNano)
+				is403, is404, neterr, err = hls.saveMedia(i, u, endNano)
 				if neterr != nil || err != nil {
 					return
 				}
@@ -1191,7 +1200,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 			}
 
 			var is404 bool
-			is403, is404, neterr, err = hls.saveMedia(seq.seqno, seq.uri, m3u8, endNano)
+			is403, is404, neterr, err = hls.saveMedia(seq.seqno, seq.uri, endNano)
 			if neterr != nil || err != nil {
 				return
 			}
@@ -1263,7 +1272,7 @@ func (hls *NicoHls) getPlaylist1(argUri *url.URL) (is403, isEnd, is500 bool, net
 				hls.playlist.uriMaster = argUri
 				hls.playlist.uri = uri
 			}
-			return hls.getPlaylist1(uri)
+			return hls.getPlaylist(uri)
 
 		} else {
 			log.Println("playlist error")
@@ -1308,6 +1317,10 @@ func (hls *NicoHls) startPlaylist(uri string) {
 				}
 			}
 
+			if hls.nicoDebug {
+				log.Printf("%s:startPlaylist: timeout=%v(sec)\n", time.Now(), float64(dur)/float64(time.Second))
+			}
+
 			select {
 			case <-time.After(dur):
 				var uri *url.URL
@@ -1322,7 +1335,7 @@ func (hls *NicoHls) startPlaylist(uri string) {
 
 				//fmt.Println(uri)
 
-				is403, isEnd, is500, neterr, err := hls.getPlaylist1(uri)
+				is403, isEnd, is500, neterr, err := hls.getPlaylist(uri)
 				if neterr != nil {
 					if hls.nInterrupt == 0 {
 						log.Println("playlist:", e)
