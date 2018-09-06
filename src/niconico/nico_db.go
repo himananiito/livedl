@@ -34,6 +34,29 @@ var SelComment = `SELECT
 	FROM comment
 	ORDER BY date2`
 
+func (hls *NicoHls) dbOpen() (err error) {
+	db, err := sql.Open("sqlite3", hls.dbName)
+	if err != nil {
+		return
+	}
+
+	hls.db = db
+
+	_, err = hls.db.Exec(`
+		PRAGMA synchronous = OFF;
+		PRAGMA journal_mode = WAL;
+	`)
+	if err != nil {
+		return
+	}
+
+	err = hls.dbCreate()
+	if err != nil {
+		hls.db.Close()
+	}
+	return
+}
+
 func (hls *NicoHls) dbCreate() (err error) {
 	hls.dbMtx.Lock()
 	defer hls.dbMtx.Unlock()
@@ -197,9 +220,14 @@ func (hls *NicoHls) dbSetPosition() {
 }
 
 func (hls *NicoHls) __dbBegin() {
+	return
+	///////////////////////////////////////////
 	hls.db.Exec(`BEGIN TRANSACTION`)
 }
 func (hls *NicoHls) __dbCommit(t time.Time) {
+	return
+	///////////////////////////////////////////
+
 	// Never hls.dbMtx.Lock()
 	var start int64
 	if hls.nicoDebug {
@@ -242,7 +270,7 @@ func (hls *NicoHls) dbExec(query string, args ...interface{}) {
 
 func (hls *NicoHls) dbKVSet(k string, v interface{}) {
 	query := `INSERT OR REPLACE INTO kvs (k,v) VALUES (?,?)`
-	go hls.dbExec(query, k, v)
+	hls.dbExec(query, k, v)
 }
 
 func (hls *NicoHls) dbInsertReplaceOrIgnore(table string, data map[string]interface{}, replace bool) {
@@ -271,7 +299,7 @@ func (hls *NicoHls) dbInsertReplaceOrIgnore(table string, data map[string]interf
 		strings.Join(qs, ","),
 	)
 
-	go hls.dbExec(query, args...)
+	hls.dbExec(query, args...)
 }
 
 func (hls *NicoHls) dbInsert(table string, data map[string]interface{}) {

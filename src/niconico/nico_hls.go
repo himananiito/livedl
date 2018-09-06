@@ -1613,21 +1613,6 @@ func (hls *NicoHls) startMain() {
 	})
 }
 
-func (hls *NicoHls) dbOpen() (err error) {
-	db, err := sql.Open("sqlite3", hls.dbName)
-	if err != nil {
-		return
-	}
-
-	hls.db = db
-
-	err = hls.dbCreate()
-	if err != nil {
-		hls.db.Close()
-	}
-	return
-}
-
 func (hls *NicoHls) serve(hlsPort int) {
 	hls.startMGoroutine(func(sig chan struct{}) int {
 		gin.SetMode(gin.ReleaseMode)
