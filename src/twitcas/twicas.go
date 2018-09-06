@@ -14,6 +14,9 @@ import (
 	"github.com/gorilla/websocket"
 	"../files"
 	"../httpbase"
+	"../procs/ffmpeg"
+	"os/exec"
+	"io"
 )
 
 type Twitcas struct {
@@ -172,10 +175,50 @@ func TwitcasRecord(user, proxy string) (done, dbLocked bool) {
 	}
 	defer os.Remove(dbName)
 
-	var file *os.File
+	//func Open(opt... string) (cmd *exec.Cmd, stdin io.WriteCloser, err error) {
+	var cmd *exec.Cmd
+	var stdin io.WriteCloser
+
 	var fileOpened bool
-	var filename string
-	var printTime int64
+
+	openFF := func() (err error) {
+		if cmd != nil {
+			if stdin != nil {
+				stdin.Close()
+			}
+			cmd.Wait()
+		}
+
+		filename := fmt.Sprintf("%s_%d.ts", user, movieId)
+		filename, err = files.GetFileNameNext(filename)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		c, in, err := ffmpeg.Open("-i", "-", "-c", "copy", "-y", filename)
+		if err != nil {
+			return
+		}
+		cmd = c
+		stdin = in
+
+		fileOpened = true
+		return
+	}
+
+	closeFF := func() {
+		if stdin != nil {
+			stdin.Close()
+		}
+		if cmd != nil {
+			cmd.Wait()
+		}
+		stdin = nil
+		cmd = nil
+	}
+
+
 	for {
 		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		messageType, data, err := conn.ReadMessage()
@@ -185,36 +228,17 @@ func TwitcasRecord(user, proxy string) (done, dbLocked bool) {
 		}
 
 		if messageType == 2 {
-			_, err := file.Write(data)
-			if err != nil {
-				if ! fileOpened {
-					file, filename, err = createFileUser(user, movieId)
-					if err != nil {
-						fmt.Printf("@err %v\n\n", err)
-						return
-					}
-					defer file.Close()
-					fileOpened = true
-
-					fmt.Printf("@Opend %s\n", filename)
-
-					_, err = file.Write(data)
-					if err != nil {
-						fmt.Printf("@err %v\n", err)
-						return
-					}
-				} else {
-					// write error
-					fmt.Printf("@err %v\n", err)
+			if cmd == nil || stdin == nil {
+				if err = openFF(); err != nil {
+					fmt.Println(err)
 					return
 				}
+				defer closeFF()
 			}
-			now := time.Now().Unix()
-			if now - printTime > 5 {
-				printTime = now
-				if info, err := file.Stat(); err == nil {
-					fmt.Printf("@Wrote %s: %d bytes\n", filename, info.Size())
-				}
+
+			if _, err := stdin.Write(data); err != nil {
+				fmt.Println(err)
+				return
 			}
 
 		} else if messageType == 1 {
@@ -249,6 +273,9 @@ func TwitcasRecord(user, proxy string) (done, dbLocked bool) {
 			}
 		}
 	}
+
+	closeFF()
+
 	done = fileOpened
 	return
 }

@@ -201,8 +201,16 @@ func (hls *NicoHls) __dbBegin() {
 }
 func (hls *NicoHls) __dbCommit(t time.Time) {
 	// Never hls.dbMtx.Lock()
+	var start int64
+	if hls.nicoDebug {
+		start = time.Now().Unix()
+	}
 	hls.db.Exec(`COMMIT; BEGIN TRANSACTION`)
-	if t.UnixNano() - hls.lastCommit.UnixNano() > 200000000 {
+	if hls.nicoDebug {
+		delta := time.Now().Unix() - start
+		log.Printf("Commit time: %v(s)\n", delta)
+	}
+	if t.UnixNano() - hls.lastCommit.UnixNano() > 500000000 {
 		log.Printf("Commit: %s\n", hls.dbName)
 	}
 	hls.lastCommit = t
@@ -234,7 +242,7 @@ func (hls *NicoHls) dbExec(query string, args ...interface{}) {
 
 func (hls *NicoHls) dbKVSet(k string, v interface{}) {
 	query := `INSERT OR REPLACE INTO kvs (k,v) VALUES (?,?)`
-	hls.dbExec(query, k, v)
+	go hls.dbExec(query, k, v)
 }
 
 func (hls *NicoHls) dbInsertReplaceOrIgnore(table string, data map[string]interface{}, replace bool) {
@@ -263,7 +271,7 @@ func (hls *NicoHls) dbInsertReplaceOrIgnore(table string, data map[string]interf
 		strings.Join(qs, ","),
 	)
 
-	hls.dbExec(query, args...)
+	go hls.dbExec(query, args...)
 }
 
 func (hls *NicoHls) dbInsert(table string, data map[string]interface{}) {
