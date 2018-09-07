@@ -25,6 +25,12 @@ type Twitcas struct {
 
 func connectStream(proto, host, mode string, id uint64, proxy string) (conn *websocket.Conn, err error) {
 	streamUrl := fmt.Sprintf(
+		//case A.InnerFrame:return"i";
+		//case A.Pframe:return"p";
+		//case A.DisposableProfile:return"bd";
+		//case A.Bframe:return"b";
+		//case A.Any:return"any";
+		//case A.KeyFrame:default:return"k"}
 		//"%s://%s/ws.app/stream/%d/fmp4/k/0/1?mode=%s",
 		"%s://%s/ws.app/stream/%d/fmp4/bd/1/1500?mode=%s",
 		proto, host, id, mode,

@@ -185,6 +185,24 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		title, _ = t.(string)
 	}
 
+	var beginTime int64
+	if t, ok := prop["beginTime"]; ok {
+		if bt, ok := t.(float64); ok {
+			beginTime = int64(bt)
+		}
+	}
+	tBegin := time.Unix(beginTime, 0)
+	sYear := fmt.Sprintf("%04d", tBegin.Year())
+	sMonth := fmt.Sprintf("%02d", tBegin.Month())
+	sDay := fmt.Sprintf("%02d", tBegin.Day())
+	sDay8 := fmt.Sprintf("%04d%02d%02d", tBegin.Year(), tBegin.Month(), tBegin.Day())
+	sDay6 := fmt.Sprintf("%02d%02d%02d", tBegin.Year()%100, tBegin.Month(), tBegin.Day())
+	sHour := fmt.Sprintf("%02d", tBegin.Hour())
+	sMinute := fmt.Sprintf("%02d", tBegin.Minute())
+	sSecond := fmt.Sprintf("%02d", tBegin.Second())
+	sTime6 := fmt.Sprintf("%02d%02d%02d", tBegin.Hour(), tBegin.Minute(), tBegin.Second())
+	sTime4 := fmt.Sprintf("%02d%02d", tBegin.Hour(), tBegin.Minute())
+
 	// "${PID}-${UNAME}-${TITLE}"
 	dbName := opt.NicoFormat
 	dbName = strings.Replace(dbName, "?PID?", files.ReplaceForbidden(pid), -1)
@@ -193,6 +211,19 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 	dbName = strings.Replace(dbName, "?CNAME?", files.ReplaceForbidden(cname), -1)
 	dbName = strings.Replace(dbName, "?CID?", files.ReplaceForbidden(cid), -1)
 	dbName = strings.Replace(dbName, "?TITLE?", files.ReplaceForbidden(title), -1)
+	// date,time
+	dbName = strings.Replace(dbName, "?YEAR?", sYear, -1)
+	dbName = strings.Replace(dbName, "?MONTH?", sMonth, -1)
+	dbName = strings.Replace(dbName, "?DAY?", sDay, -1)
+	dbName = strings.Replace(dbName, "?DAY8?", sDay8, -1)
+	dbName = strings.Replace(dbName, "?DAY6?", sDay6, -1)
+	dbName = strings.Replace(dbName, "?HOUR?", sHour, -1)
+	dbName = strings.Replace(dbName, "?MINUTE?", sMinute, -1)
+	dbName = strings.Replace(dbName, "?SECOND?", sSecond, -1)
+	dbName = strings.Replace(dbName, "?TIME6?", sTime6, -1)
+	dbName = strings.Replace(dbName, "?TIME4?", sTime4, -1)
+
+
 	if timeshift {
 		dbName = dbName + "(TS)"
 	}
