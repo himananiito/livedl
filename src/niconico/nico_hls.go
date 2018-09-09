@@ -69,6 +69,7 @@ type NicoHls struct {
 	mtxGoCh sync.Mutex
 	chInterrupt chan os.Signal
 	nInterrupt int
+	mtxInterrupt sync.Mutex
 
 	mtxRestart sync.Mutex
 	restartMain bool
@@ -462,8 +463,8 @@ func (hls *NicoHls) startInterrupt() {
 	hls.startMGoroutine(func(sig chan struct{}) int {
 		select {
 		case <-hls.chInterrupt:
-			hls.nInterrupt++
-		fmt.Printf("Interrupt count: %d\n", hls.nInterrupt)
+			hls.IncrInterrupt()
+			fmt.Printf("Interrupt count: %d\n", hls.nInterrupt)
 			go func() {
 				hls.dbCommit()
 			}()
@@ -476,6 +477,16 @@ func (hls *NicoHls) startInterrupt() {
 			return GOT_SIGNAL
 		}
 	})
+}
+func (hls *NicoHls) IncrInterrupt() {
+	hls.mtxInterrupt.Lock()
+	defer hls.mtxInterrupt.Unlock()
+	hls.nInterrupt++
+}
+func (hls *NicoHls) interrupted() bool {
+	hls.mtxInterrupt.Lock()
+	defer hls.mtxInterrupt.Unlock()
+	return hls.nInterrupt != 0
 }
 
 func (hls *NicoHls) getStartDelay() int {
@@ -518,7 +529,7 @@ func (hls *NicoHls) checkReturnCode(code int) {
 		// 番組終了時、websocketでEND_PROGRAMが来るよりも先にこうなるが、
 		// END_PROGRAMを受信するにはwebsocketの再接続が必要
 		//log.Println("403")
-		if hls.nInterrupt == 0 {
+		if (! hls.interrupted()) {
 			hls.markRestartMain(0)
 		}
 		hls.stopPGoroutines()
@@ -629,13 +640,13 @@ func (hls *NicoHls) startGoroutine2(start_t int, f func(chan struct{}) int) {
 }
 // Of playlist
 func (hls *NicoHls) startPGoroutine(f func(chan struct{}) int) {
-	if hls.nInterrupt == 0 {
+	if (! hls.interrupted()) {
 		hls.startGoroutine2(START_PLAYLIST, f)
 	}
 }
 // Of comment
 func (hls *NicoHls) startCGoroutine(f func(chan struct{}) int) {
-	if hls.nInterrupt == 0 {
+	if (! hls.interrupted()) {
 		hls.startGoroutine2(START_COMMENT, f)
 	}
 }
@@ -729,10 +740,16 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 				},
 			)
 			if err != nil {
-				if hls.nInterrupt == 0 {
+				if (! hls.interrupted()) {
 					log.Println("comment connect:", err)
 				}
 				return COMMENT_WS_ERROR
+			}
+			var wsMtx sync.Mutex
+			writeJson := func(d interface{}) error {
+				wsMtx.Lock()
+				defer wsMtx.Unlock()
+				return conn.WriteJSON(d)
 			}
 
 			hls.startCGoroutine(func(sig chan struct{}) int {
@@ -744,12 +761,12 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 			})
 
 			hls.startCGoroutine(func(sig chan struct{}) int {
-				for hls.nInterrupt == 0 {
+				for (! hls.interrupted()) {
 					select {
 						case <-time.After(60 * time.Second):
 							if conn != nil {
-								if err := conn.WriteJSON(""); err != nil {
-									if hls.nInterrupt == 0 {
+								if err := writeJson(""); err != nil {
+									if (! hls.interrupted()) {
 										log.Println("comment send null:", err)
 									}
 									return COMMENT_WS_ERROR
@@ -786,7 +803,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 
 					var pre int64
 					var finishHint int
-					for hls.nInterrupt == 0 {
+					for (! hls.interrupted()) {
 						select {
 							case <-time.After(1 * time.Second):
 								c := getChatCount()
@@ -805,7 +822,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 
 									//fmt.Printf("getTsCommentFromWhen %f %d\n", when, res_from)
 
-									err = conn.WriteJSON([]OBJ{
+									err = writeJson([]OBJ{
 										OBJ{"ping": OBJ{"content": "rs:1"}},
 										OBJ{"ping": OBJ{"content": "ps:5"}},
 										OBJ{"thread": OBJ{
@@ -847,7 +864,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 				})
 
 			} else {
-				err = conn.WriteJSON([]OBJ{
+				err = writeJson([]OBJ{
 					OBJ{"ping": OBJ{"content": "rs:0"}},
 					OBJ{"ping": OBJ{"content": "ps:0"}},
 					OBJ{"thread": OBJ{
@@ -864,14 +881,14 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 					OBJ{"ping": OBJ{"content": "rf:0"}},
 				})
 				if err != nil {
-					if hls.nInterrupt == 0 {
+					if (! hls.interrupted()) {
 						log.Println("comment send first:", err)
 					}
 					return COMMENT_WS_ERROR
 				}
 			}
 
-			for hls.nInterrupt == 0 {
+			for (! hls.interrupted()) {
 				select {
 				case <-sig:
 					return GOT_SIGNAL
@@ -1336,7 +1353,7 @@ func (hls *NicoHls) startPlaylist(uri string) {
 			hls.playlist.uri = uri
 		}
 
-		for hls.nInterrupt == 0 {
+		for (! hls.interrupted()) {
 			var dur time.Duration
 			if (hls.playlist.nextTime.IsZero()) {
 				dur = 0
@@ -1368,19 +1385,19 @@ func (hls *NicoHls) startPlaylist(uri string) {
 
 				is403, isEnd, is500, neterr, err := hls.getPlaylist(uri)
 				if neterr != nil {
-					if hls.nInterrupt == 0 {
+					if (! hls.interrupted()) {
 						log.Println("playlist:", e)
 					}
 					return NETWORK_ERROR
 				}
 				if is500 {
-					if hls.nInterrupt == 0 {
+					if (! hls.interrupted()) {
 						log.Println("playlist(500):", e)
 					}
 					return NETWORK_ERROR
 				}
 				if err != nil {
-					if hls.nInterrupt == 0 {
+					if (! hls.interrupted()) {
 						log.Println("playlist:", e)
 					}
 					return PLAYLIST_ERROR
@@ -1420,6 +1437,14 @@ func (hls *NicoHls) startMain() {
 		if err != nil {
 			return NETWORK_ERROR
 		}
+		var wsMtx sync.Mutex
+		writeJson := func(d interface{}) error {
+			wsMtx.Lock()
+			defer wsMtx.Unlock()
+			return conn.WriteJSON(d)
+		}
+
+		// debug
 		if false {
 			log.Printf("start ws error tsst")
 			hls.startPGoroutine(func(sig chan struct{}) int {
@@ -1432,6 +1457,7 @@ func (hls *NicoHls) startMain() {
 				}
 			})
 		}
+
 		hls.startPGoroutine(func(sig chan struct{}) int {
 			<-sig
 			if conn != nil {
@@ -1440,7 +1466,7 @@ func (hls *NicoHls) startMain() {
 			return OK
 		})
 
-		err = conn.WriteJSON(OBJ{
+		err = writeJson(OBJ{
 			"type": "watch",
 			"body": OBJ{
 				"command": "playerversion",
@@ -1450,13 +1476,13 @@ func (hls *NicoHls) startMain() {
 			},
 		})
 		if err != nil {
-			if hls.nInterrupt == 0 {
+			if (! hls.interrupted()) {
 				log.Println("websocket playerversion write:", err)
 			}
 			return NETWORK_ERROR
 		}
 
-		err = conn.WriteJSON(OBJ{
+		err = writeJson(OBJ{
 			"type": "watch",
 			"body": OBJ{
 				"command": "getpermit",
@@ -1477,7 +1503,7 @@ func (hls *NicoHls) startMain() {
 			},
 		})
 		if err != nil {
-			if hls.nInterrupt == 0 {
+			if (! hls.interrupted()) {
 				log.Println("websocket getpermit write:", err)
 			}
 			return NETWORK_ERROR
@@ -1486,7 +1512,7 @@ func (hls *NicoHls) startMain() {
 		var playlistStarted bool
 		var watchingStarted bool
 		var watchinginterval int
-		for hls.nInterrupt == 0 {
+		for (! hls.interrupted()) {
 			select {
 			case <-sig:
 				return GOT_SIGNAL
@@ -1495,7 +1521,7 @@ func (hls *NicoHls) startMain() {
 			var res interface{}
 			err = conn.ReadJSON(&res)
 			if err != nil {
-				if hls.nInterrupt == 0 && (! hls.finish) {
+				if (! hls.interrupted()) && (! hls.finish) {
 					log.Println("websocket read:", err)
 				}
 				return NETWORK_ERROR
@@ -1531,7 +1557,7 @@ func (hls *NicoHls) startMain() {
 								for {
 									select {
 									case <-time.After(time.Duration(watchinginterval) * time.Second):
-										err := conn.WriteJSON(OBJ{
+										err := writeJson(OBJ{
 											"type": "watch",
 											"body": OBJ{
 												"command": "watching",
@@ -1543,7 +1569,7 @@ func (hls *NicoHls) startMain() {
 											},
 										})
 										if err != nil {
-											if hls.nInterrupt == 0 {
+											if (! hls.interrupted()) {
 												log.Println("websocket watching:", err)
 											}
 											return NETWORK_ERROR
@@ -1602,12 +1628,12 @@ func (hls *NicoHls) startMain() {
 				}
 
 			case "ping":
-				err := conn.WriteJSON(OBJ{
+				err := writeJson(OBJ{
 					"type": "pong",
 					"body": OBJ{},
 				})
 				if err != nil {
-					if hls.nInterrupt == 0 {
+					if (! hls.interrupted()) {
 						log.Println("websocket watching:", err)
 					}
 					return NETWORK_ERROR
