@@ -19,6 +19,7 @@ func GetUserAgent() string {
 	)
 }
 
+var Client = &http.Client{}
 func httpBase(method, uri string, header map[string]string, body io.Reader) (resp *http.Response, err, neterr error) {
 
 	req, err := http.NewRequest(method, uri, body)
@@ -31,7 +32,7 @@ func httpBase(method, uri string, header map[string]string, body io.Reader) (res
 
 	req.Header.Set("User-Agent", GetUserAgent())
 
-	resp, neterr = http.DefaultClient.Do(req)
+	resp, neterr = Client.Do(req)
 	if neterr != nil {
 		return
 	}

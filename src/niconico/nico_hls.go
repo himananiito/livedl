@@ -935,6 +935,7 @@ func urlJoin(base *url.URL, uri string) (res *url.URL, err error) {
 }
 
 func getString(uri string) (s string, code int, err, neterr error) {
+	httpbase.Client.Timeout = time.Duration(5) * time.Second
 	resp, err, neterr := httpbase.Get(uri, nil)
 	if err != nil {
 		return
@@ -961,6 +962,7 @@ func getString(uri string) (s string, code int, err, neterr error) {
 func getBytes(uri string) (code int, buff []byte, start, tresp, end int64, err, neterr error) {
 	start = time.Now().UnixNano()
 
+	httpbase.Client.Timeout = time.Duration(5) * time.Second
 	resp, err, neterr := httpbase.Get(uri, nil)
 	if err != nil {
 		return
