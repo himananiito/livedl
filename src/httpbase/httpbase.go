@@ -6,6 +6,7 @@ import (
 	"strings"
 	"net/http"
 	"net/url"
+	"time"
 	"../buildno"
 	"../defines"
 )
@@ -19,7 +20,9 @@ func GetUserAgent() string {
 	)
 }
 
-var Client = &http.Client{}
+var Client = &http.Client{
+	Timeout: time.Duration(5) * time.Second,
+}
 func httpBase(method, uri string, header map[string]string, body io.Reader) (resp *http.Response, err, neterr error) {
 
 	req, err := http.NewRequest(method, uri, body)

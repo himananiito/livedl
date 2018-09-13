@@ -31,6 +31,7 @@ import (
 	"../httpbase"
 	"github.com/gin-gonic/gin"
 	"context"
+	"math"
 )
 
 type OBJ = map[string]interface{}
@@ -44,7 +45,6 @@ type playlist struct {
 	format string
 	withoutFormat bool
 	seqNo int
-	m3u8ms int64
 	position float64
 }
 type NicoHls struct {
@@ -95,6 +95,14 @@ type NicoHls struct {
 	limitBw int
 
 	nicoDebug bool
+	msgErrorCount int
+	msgErrorSeqNo int
+	memdb *sql.DB
+	memdbMtx sync.Mutex
+
+}
+func debug_Now() string {
+	return time.Now().Format("2006/01/02-15:04:05.00")
 }
 func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err error) {
 
@@ -267,6 +275,11 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		hls.dbName = fmt.Sprintf("%s.sqlite3", pid)
 	}
 
+	if err := hls.memdbOpen(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
 	// 放送情報をdbに入れる。自身のユーザ情報は入れない
 	// dbに入れたくないデータはキーの先頭を//としている
 	for k, v := range prop {
@@ -281,6 +294,9 @@ func (hls *NicoHls) Close() {
 	hls.dbCommit()
 	if hls.db != nil {
 		hls.db.Close()
+	}
+	if hls.memdb != nil {
+		hls.memdb.Close()
 	}
 }
 
@@ -934,8 +950,12 @@ func urlJoin(base *url.URL, uri string) (res *url.URL, err error) {
 	return
 }
 
-func getString(uri string) (s string, code int, err, neterr error) {
-	httpbase.Client.Timeout = time.Duration(5) * time.Second
+func getString(uri string) (s string, code int, t int64, err, neterr error) {
+	start := time.Now().UnixNano()
+	defer func() {
+		t = (time.Now().UnixNano() - start) / (1000 * 1000)
+	}()
+
 	resp, err, neterr := httpbase.Get(uri, nil)
 	if err != nil {
 		return
@@ -952,17 +972,17 @@ func getString(uri string) (s string, code int, err, neterr error) {
 
 	s = string(bs)
 
-	//fmt.Println("<----" + s + "---->")
-
 	code = resp.StatusCode
 
 	return
 }
 
-func getBytes(uri string) (code int, buff []byte, start, tresp, end int64, err, neterr error) {
-	start = time.Now().UnixNano()
+func getBytes(uri string) (code int, buff []byte, t int64, err, neterr error) {
+	start := time.Now().UnixNano()
+	defer func() {
+		t = (time.Now().UnixNano() - start) / (1000 * 1000)
+	}()
 
-	httpbase.Client.Timeout = time.Duration(5) * time.Second
 	resp, err, neterr := httpbase.Get(uri, nil)
 	if err != nil {
 		return
@@ -972,24 +992,24 @@ func getBytes(uri string) (code int, buff []byte, start, tresp, end int64, err, 
 	}
 	defer resp.Body.Close()
 
-	tresp = time.Now().UnixNano()
-
 	buff, neterr = ioutil.ReadAll(resp.Body)
 	if neterr != nil {
 		return
 	}
-
-	end = time.Now().UnixNano()
 
 	code = resp.StatusCode
 
 	return
 }
 
-func (hls *NicoHls) saveMedia(seqno int, uri string, endNano int64) (is403, is404 bool, neterr, err error) {
-//fmt.Printf("saveMedia %v %v\n", seqno, uri)
+func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr, err error) {
 
-	code, buff, start, tresp, end, err, neterr := getBytes(uri)
+	code, buff, millisec, err, neterr := getBytes(uri)
+	defer func(){buff = nil}()
+	if hls.nicoDebug {
+		fmt.Printf("%s:saveMedia: seqno=%d, code=%v, err=%v, neterr=%v, %v(ms), len=%v\n",
+			debug_Now(), seqno, code, err, neterr, millisec, len(buff))
+	}
 	if err != nil || neterr != nil {
 		return
 	}
@@ -1003,9 +1023,9 @@ func (hls *NicoHls) saveMedia(seqno int, uri string, endNano int64) (is403, is40
 			"seqno": seqno,
 			"current": hls.playlist.seqNo,
 			"notfound": 1,
-			"m3u8time": endNano / 1000000000, // 180822 add
 		}
 		hls.dbInsert("media", data)
+		hls.memdbSet404(seqno)
 		is404 = true
 		return
 	}
@@ -1015,32 +1035,27 @@ func (hls *NicoHls) saveMedia(seqno int, uri string, endNano int64) (is403, is40
 		"current": hls.playlist.seqNo,
 		"size": len(buff),
 		"bandwidth": hls.playlist.bandwidth,
-		"hdrms": ((tresp - start) / (1000 * 1000)),
-		"chunkms": ((end - start) / (1000 * 1000)),
 		"data": buff,
-		"m3u8time": endNano / 1000000000, // 180822 add
 	}
 
 	if seqno == hls.playlist.seqNo {
-		data["m3u8ms"] = hls.playlist.m3u8ms
-
 		if hls.isTimeshift {
 			data["position"] = hls.playlist.position
 		}
 	}
 
 	hls.dbReplace("media", data)
+	hls.memdbSet200(seqno)
 
 	return
 }
 
 func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, neterr, err error) {
 
-	start := time.Now().UnixNano()
-
-	m3u8, code, err, neterr := getString(argUri.String())
+	m3u8, code, millisec, err, neterr := getString(argUri.String())
 	if hls.nicoDebug {
-		log.Printf("%s:getPlaylist/getString: code=%v, err=%v, neterr=%v\n>>>%s<<<\n", time.Now(), code, err, neterr, m3u8)
+		fmt.Printf("%s:getPlaylist: code=%v, err=%v, neterr=%v, %v(ms) >>>%s<<<\n",
+			debug_Now(), code, err, neterr, millisec, m3u8)
 	}
 	if err != nil || neterr != nil {
 		return
@@ -1060,8 +1075,6 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 		err = fmt.Errorf("playlist code: %d: %s", code, argUri.String())
 		return
 	}
-
-	endNano := time.Now().UnixNano()
 
 	re := regexp.MustCompile(`#EXT-X-MEDIA-SEQUENCE:(\d+)`)
 	ma := re.FindStringSubmatch(m3u8)
@@ -1101,11 +1114,6 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 			log.Fatal(err)
 		}
 		hls.playlist.seqNo = seqStart
-		hls.playlist.m3u8ms = (endNano - start) / (1000 * 1000)
-
-		if hls.nicoDebug {
-			fmt.Printf("%v:getPlaylist/getString: seqNo=%v, m3u8ms=%v(ms)\n", time.Now(), hls.playlist.seqNo, hls.playlist.m3u8ms)
-		}
 
 		re := regexp.MustCompile(`#EXTINF:([\+\-]?\d+(?:\.\d+)?(?:[eE][\+\-]?\d+)?)[^\n]*\n(\S+)`)
 		ma := re.FindAllStringSubmatch(m3u8, -1)
@@ -1210,38 +1218,49 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 			fmt.Printf("Current SeqNo: %d\n", hls.playlist.seqNo)
 		}
 
+		minSeq := math.MaxInt32
+		maxSeq := -1
 		if (! hls.isTimeshift) && (! hls.playlist.withoutFormat) {
 			// 404になるまで後ろに戻ってチャンクを取得する
 			for i := hls.playlist.seqNo - 1; i >= 0; i-- {
-				if hls.dbCheckBack(i) {
-					hls.dbMarkNoBack(hls.playlist.seqNo - 1)
+				if hls.memdbGetStopBack(i) {
 					break
-				} else if hls.dbCheckSequence(i, true) {
-					continue
 				}
+				//if hls.dbCheckBack(i) {
+				//	hls.dbMarkNoBack(hls.playlist.seqNo - 1)
+				//	break
+				//} else if hls.dbCheckSequence(i, true) {
+				//	continue
+				//}
 
 				u := fmt.Sprintf(hls.playlist.format, i)
 				var is404 bool
-				is403, is404, neterr, err = hls.saveMedia(i, u, endNano)
+				is403, is404, neterr, err = hls.saveMedia(i, u)
 				if neterr != nil || err != nil {
 					return
 				}
 				if is403 {
 					return
 				}
+
+				if i > maxSeq {
+					maxSeq = i
+				}
+				if i < minSeq {
+					minSeq = i
+				}
+
 				if is404 {
-					hls.dbMarkNoBack(hls.playlist.seqNo - 1)
 					break
 				}
 			}
 		}
 
 		// m3u8の通りにチャンクを取得する
+		var found404 bool
 		for _, seq := range seqlist {
-			if hls.dbCheckSequence(seq.seqno, false) {
+			if hls.memdbCheck200(seq.seqno) {
 				if seq.seqno == hls.playlist.seqNo {
-					hls.dbSetM3u8ms()
-
 					if hls.isTimeshift {
 						hls.dbSetPosition()
 					}
@@ -1250,16 +1269,32 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 			}
 
 			var is404 bool
-			is403, is404, neterr, err = hls.saveMedia(seq.seqno, seq.uri, endNano)
+			is403, is404, neterr, err = hls.saveMedia(seq.seqno, seq.uri)
 			if neterr != nil || err != nil {
 				return
 			}
 			if is404 {
 				fmt.Printf("sequence 404: %d\n", seq.seqno)
+				found404 = true
 			}
 			if is403 {
 				return
 			}
+
+			if seq.seqno < minSeq {
+				minSeq = seq.seqno
+			}
+			if (! found404) {
+				maxSeq = seq.seqno
+			}
+		}
+
+		if minSeq != math.MaxInt32 && maxSeq > 0 {
+			for i := minSeq; i <= maxSeq ; i++ {
+				hls.memdbSetStopBack(i)
+			}
+			hls.memdbDelete(hls.playlist.seqNo)
+			//fmt.Printf("memdbCount: %v\n", hls.memdbCount())
 		}
 
 		if strings.Contains(m3u8, "#EXT-X-ENDLIST") {
@@ -1368,7 +1403,7 @@ func (hls *NicoHls) startPlaylist(uri string) {
 			}
 
 			if hls.nicoDebug {
-				log.Printf("%s:startPlaylist: timeout=%v(sec)\n", time.Now(), float64(dur)/float64(time.Second))
+				fmt.Printf("%s:time.After()=%v(sec)\n", debug_Now(), float64(dur)/float64(time.Second))
 			}
 
 			select {
@@ -1528,8 +1563,10 @@ func (hls *NicoHls) startMain() {
 				}
 				return NETWORK_ERROR
 			}
+			if hls.nicoDebug {
+				fmt.Printf("%s:ReadJSON => %v\n", debug_Now(), res)
+			}
 
-			//fmt.Printf("ReadJSON => %v\n", res)
 			_type, ok := obj.FindString(res, "type")
 			if (! ok) {
 				fmt.Printf("type not found\n")
@@ -1646,6 +1683,8 @@ func (hls *NicoHls) startMain() {
 					log.Printf("Unknown error: %#v\n", res)
 					return ERROR_SHUTDOWN
 				}
+
+				// http://nicolive.cdn.nimg.jp/relive/front_assets/scripts/nicolib.4bb8b62b35.js
 				switch code {
 				case "INVALID_STREAM_QUALITY":
 					// webSocket自体を再接続しないと、コメントサーバが取得できない
@@ -1656,12 +1695,35 @@ func (hls *NicoHls) startMain() {
 					default:
 						return ERROR_SHUTDOWN
 					}
-				case "CONTENT_NOT_READY":
-					return ERROR_SHUTDOWN
-
+				//case
+				//	"INTERNAL_SERVERERROR",
+				//	"CONTENT_NOT_READY", // 終了後に出ることがある
+				//	"CONNECT_ERROR": // 終了後に出ることがある
+				//	return NETWORK_ERROR
+				//case
+				//	"INVALID_BROADCAST_ID",
+				//	"BROADCAST_NOT_FOUND",
+				//	"NO_THREAD_AVAILABLE",
+				//	"NO_ROOM_AVAILABLE",
+				//	"NO_PERMISSION":
+				//	return ERROR_SHUTDOWN
+				case "INVALID_MESSAGE":
+					// 公式のTSで送られてきた。単純に無視する。
 				default:
-					log.Printf("Unknown error: %s\n%#v\n", code, res)
-					return ERROR_SHUTDOWN
+				//	log.Printf("Unknown error: %s\n%#v\n", code, res)
+				//	return ERROR_SHUTDOWN
+					fmt.Printf("error code: %v\n", code)
+					if hls.msgErrorSeqNo == hls.playlist.seqNo {
+						hls.msgErrorCount++
+					} else {
+						hls.msgErrorSeqNo = hls.playlist.seqNo
+						hls.msgErrorCount = 1
+					}
+					if hls.msgErrorCount >= 3 {
+						return ERROR_SHUTDOWN
+					} else {
+						return NETWORK_ERROR
+					}
 				}
 
 			default:

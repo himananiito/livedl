@@ -67,15 +67,11 @@ func (hls *NicoHls) dbCreate() (err error) {
 	CREATE TABLE IF NOT EXISTS media (
 		seqno     INTEGER PRIMARY KEY NOT NULL UNIQUE,
 		current   INTEGER,
-		m3u8time  INTEGER,
 		position  REAL,
 		notfound  INTEGER,
 		noback    INTEGER,
 		bandwidth INTEGER,
 		size      INTEGER,
-		m3u8ms    INTEGER,
-		hdrms     INTEGER,
-		chunkms   INTEGER,
 		data      BLOB
 	)
 	`)
@@ -89,9 +85,6 @@ func (hls *NicoHls) dbCreate() (err error) {
 	---- for debug ----
 	CREATE INDEX IF NOT EXISTS media100 ON media(size);
 	CREATE INDEX IF NOT EXISTS media101 ON media(notfound);
-	CREATE INDEX IF NOT EXISTS media102 ON media(m3u8ms);
-	CREATE INDEX IF NOT EXISTS media103 ON media(hdrms);
-	CREATE INDEX IF NOT EXISTS media104 ON media(chunkms);
 	`)
 	if err != nil {
 		return
@@ -156,10 +149,21 @@ func (hls *NicoHls) dbCreate() (err error) {
 }
 
 //
-
+/*
 func (hls *NicoHls) dbCheckSequence(seqno int, checkNotFound bool) (res bool) {
 	hls.dbMtx.Lock()
 	defer hls.dbMtx.Unlock()
+
+	if true || hls.nicoDebug {
+		start := time.Now().UnixNano()
+		defer func() {
+			t := (time.Now().UnixNano() - start) / (1000 * 1000)
+			if t > 100 {
+				fmt.Printf("%s:[WARN]dbCheckSequence: %d(ms), %v, %v\n", debug_Now(), t, seqno, checkNotFound)
+			}
+		}()
+	}
+
 	if checkNotFound {
 		hls.db.QueryRow("SELECT size IS NOT NULL OR notfound <> 0 FROM media WHERE seqno=?", seqno).Scan(&res)
 	} else {
@@ -167,25 +171,44 @@ func (hls *NicoHls) dbCheckSequence(seqno int, checkNotFound bool) (res bool) {
 	}
 	return
 }
+*/
+/*
 func (hls *NicoHls) dbCheckBack(seqno int) (res bool) {
 	hls.dbMtx.Lock()
 	defer hls.dbMtx.Unlock()
+
+	if true || hls.nicoDebug {
+		start := time.Now().UnixNano()
+		defer func() {
+			t := (time.Now().UnixNano() - start) / (1000 * 1000)
+			if t > 100 {
+				fmt.Printf("%s:[WARN]dbCheckBack: %d(ms), %v\n", debug_Now(), t, seqno)
+			}
+		}()
+	}
+
 	hls.db.QueryRow("SELECT noback <> 0 OR notfound <> 0 FROM media WHERE seqno=?", seqno).Scan(&res)
 	return
 }
+*/
+/*
 func (hls *NicoHls) dbMarkNoBack(seqno int) {
-	hls.dbMtx.Lock()
-	defer hls.dbMtx.Unlock()
-
-	_, err := hls.db.Exec(`
+	hls.dbExec(`
 		INSERT OR IGNORE INTO media (seqno, noback) VALUES(?, 1);
 		UPDATE media SET noback = 1 WHERE seqno=?
 	`, seqno, seqno)
-	if err != nil {
-		fmt.Println(err)
-	}
+}
+*/
+
+// timeshift
+func (hls *NicoHls) dbSetPosition() {
+	hls.dbExec(`UPDATE media SET position = ? WHERE seqno=?`,
+		hls.playlist.position,
+		hls.playlist.seqNo,
+	)
 }
 
+// timeshift
 func (hls *NicoHls) dbGetLastPosition() (res float64) {
 	hls.dbMtx.Lock()
 	defer hls.dbMtx.Unlock()
@@ -194,54 +217,22 @@ func (hls *NicoHls) dbGetLastPosition() (res float64) {
 	return
 }
 
-func (hls *NicoHls) dbSetM3u8ms() {
-	hls.dbMtx.Lock()
-	defer hls.dbMtx.Unlock()
-
-	_, err := hls.db.Exec(`UPDATE media SET m3u8ms = ? WHERE seqno=?`,
-		hls.playlist.m3u8ms,
-		hls.playlist.seqNo,
-	)
-	if err != nil {
-		fmt.Println(err)
-	}
-}
-func (hls *NicoHls) dbSetPosition() {
-	hls.dbMtx.Lock()
-	defer hls.dbMtx.Unlock()
-
-	_, err := hls.db.Exec(`UPDATE media SET position = ? WHERE seqno=?`,
-		hls.playlist.position,
-		hls.playlist.seqNo,
-	)
-	if err != nil {
-		fmt.Println(err)
-	}
-}
-
 func (hls *NicoHls) __dbBegin() {
 	return
 	///////////////////////////////////////////
-	hls.db.Exec(`BEGIN TRANSACTION`)
+	//hls.db.Exec(`BEGIN TRANSACTION`)
 }
 func (hls *NicoHls) __dbCommit(t time.Time) {
 	return
 	///////////////////////////////////////////
 
-	// Never hls.dbMtx.Lock()
-	var start int64
-	if hls.nicoDebug {
-		start = time.Now().Unix()
-	}
-	hls.db.Exec(`COMMIT; BEGIN TRANSACTION`)
-	if hls.nicoDebug {
-		delta := time.Now().Unix() - start
-		log.Printf("Commit time: %v(s)\n", delta)
-	}
-	if t.UnixNano() - hls.lastCommit.UnixNano() > 500000000 {
-		log.Printf("Commit: %s\n", hls.dbName)
-	}
-	hls.lastCommit = t
+	//// Never hls.dbMtx.Lock()
+	//var start int64
+	//hls.db.Exec(`COMMIT; BEGIN TRANSACTION`)
+	//if t.UnixNano() - hls.lastCommit.UnixNano() > 500000000 {
+	//	log.Printf("Commit: %s\n", hls.dbName)
+	//}
+	//hls.lastCommit = t
 }
 func (hls *NicoHls) dbCommit() {
 	hls.dbMtx.Lock()
@@ -253,24 +244,32 @@ func (hls *NicoHls) dbExec(query string, args ...interface{}) {
 	hls.dbMtx.Lock()
 	defer hls.dbMtx.Unlock()
 
-//fmt.Println(query)
+	if hls.nicoDebug {
+		start := time.Now().UnixNano()
+		defer func() {
+			t := (time.Now().UnixNano() - start) / (1000 * 1000)
+			if t > 100 {
+				fmt.Printf("%s:[WARN]dbExec: %d(ms):%s\n", debug_Now(), t, query)
+			}
+		}()
+	}
 
 	if _, err := hls.db.Exec(query, args...); err != nil {
 		fmt.Printf("dbExec %#v\n", err)
-		hls.db.Exec("COMMIT")
+		//hls.db.Exec("COMMIT")
 		hls.db.Close()
 		os.Exit(1)
 	}
 
-	now := time.Now()
-	if now.After(hls.lastCommit.Add(15 * time.Second)) {
-		hls.__dbCommit(now)
-	}
+	//now := time.Now()
+	//if now.After(hls.lastCommit.Add(15 * time.Second)) {
+	//	hls.__dbCommit(now)
+	//}
 }
 
 func (hls *NicoHls) dbKVSet(k string, v interface{}) {
 	query := `INSERT OR REPLACE INTO kvs (k,v) VALUES (?,?)`
-	hls.dbExec(query, k, v)
+	go hls.dbExec(query, k, v)
 }
 
 func (hls *NicoHls) dbInsertReplaceOrIgnore(table string, data map[string]interface{}, replace bool) {
@@ -299,7 +298,7 @@ func (hls *NicoHls) dbInsertReplaceOrIgnore(table string, data map[string]interf
 		strings.Join(qs, ","),
 	)
 
-	hls.dbExec(query, args...)
+	go hls.dbExec(query, args...)
 }
 
 func (hls *NicoHls) dbInsert(table string, data map[string]interface{}) {
@@ -309,13 +308,12 @@ func (hls *NicoHls) dbReplace(table string, data map[string]interface{}) {
 	hls.dbInsertReplaceOrIgnore(table, data, true)
 }
 
-
+// timeshift
 func (hls *NicoHls) dbGetFromWhen() (res_from int, when float64) {
 	hls.dbMtx.Lock()
 	defer hls.dbMtx.Unlock()
 	var date2 int64
 	var no int
-
 
 	hls.db.QueryRow("SELECT date2, no FROM comment ORDER BY date2 ASC LIMIT 1").Scan(&date2, &no)
 	res_from = no
