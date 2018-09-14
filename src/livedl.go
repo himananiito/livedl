@@ -141,11 +141,18 @@ func main() {
 		}
 
 	case "DB2MP4":
-		if _, _, err := zip2mp4.ConvertDB(opt.DBFile, opt.ConvExt); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
+		if opt.ExtractChunks {
+			if _, err := zip2mp4.ExtractChunks(opt.DBFile); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
 
+		} else {
+			if _, _, err := zip2mp4.ConvertDB(opt.DBFile, opt.ConvExt); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+		}
 	}
 
 

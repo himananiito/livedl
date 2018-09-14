@@ -8,18 +8,25 @@ import (
 	"regexp"
 )
 
+func RemoveExtention(fileName string) string {
+	e := filepath.Ext(fileName)
+	base := strings.TrimSuffix(fileName, e)
+	return base
+}
 func ChangeExtention(fileName, ext string) string {
 	e := filepath.Ext(fileName)
 	base := strings.TrimSuffix(fileName, e)
 	return base + "." + ext
 }
 
-func MkdirByFileName(fileName string) {
+func MkdirByFileName(fileName string) (err error) {
 	dir := filepath.Dir(fileName)
-	err := os.MkdirAll(dir, os.ModePerm)
+	err = os.MkdirAll(dir, os.ModePerm)
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
+	return
 }
 
 func GetFileNameNext(name string) (fileName string, err error) {

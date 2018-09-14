@@ -48,6 +48,7 @@ type Option struct {
 	NicoAutoDeleteDBMode int // 0:削除しない 1:mp4が分割されなかったら削除 2:分割されても削除
 	NicoDebug bool // デバッグ情報の記録
 	ConvExt string
+	ExtractChunks bool
 }
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
@@ -119,6 +120,8 @@ COMMAND:
   -tcas-retry-interval           (+) 再試行を行う間隔（秒）デフォルト: 60秒
 
 変換オプション
+  -extract-chunks=off            (+) -d2mで動画ファイルに書き出す(デフォルト)
+  -extract-chunks=on             (+) -d2mで各々のチャンクを書き出す
   -conv-ext=mp4                  (+) -d2mで出力の拡張子を.mp4とする(デフォルト)
   -conv-ext=ts                   (+) -d2mで出力の拡張子を.tsとする
 
@@ -296,7 +299,8 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "TcasRetry"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryTimeoutMinute"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryInterval"), 0),
-		IFNULL((SELECT v FROM conf WHERE k == "ConvExt"), "")
+		IFNULL((SELECT v FROM conf WHERE k == "ConvExt"), ""),
+		IFNULL((SELECT v FROM conf WHERE k == "ExtractChunks"), 0)
 	`).Scan(
 		&opt.NicoFormat,
 		&opt.NicoLimitBw,
@@ -310,6 +314,7 @@ func ParseArgs() (opt Option) {
 		&opt.TcasRetryTimeoutMinute,
 		&opt.TcasRetryInterval,
 		&opt.ConvExt,
+		&opt.ExtractChunks,
 	)
 	if err != nil {
 		log.Println(err)
@@ -698,6 +703,15 @@ func ParseArgs() (opt Option) {
 			dbConfSet(db, "ConvExt", opt.ConvExt)
 			return nil
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?extract(?:-?chunks)?(?:=(on|off))\z`), func() error {
+			if strings.EqualFold(match[1], "on") {
+				opt.ExtractChunks = true
+			} else if strings.EqualFold(match[1], "off") {
+				opt.ExtractChunks = false
+			}
+			dbConfSet(db, "ExtractChunks", opt.ExtractChunks)
+			return nil
+		}},
 	}
 
 	checkFILE := func(arg string) bool {
@@ -813,6 +827,7 @@ func ParseArgs() (opt Option) {
 		fmt.Printf("Conf(NicoAutoConvert): %#v\n", opt.NicoAutoConvert)
 		if opt.NicoAutoConvert {
 			fmt.Printf("Conf(NicoAutoDeleteDBMode): %#v\n", opt.NicoAutoDeleteDBMode)
+			fmt.Printf("Conf(ExtractChunks): %#v\n", opt.ExtractChunks)
 			fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
 		}
 
@@ -821,6 +836,7 @@ func ParseArgs() (opt Option) {
 		fmt.Printf("Conf(TcasRetryTimeoutMinute): %#v\n", opt.TcasRetryTimeoutMinute)
 		fmt.Printf("Conf(TcasRetryInterval): %#v\n", opt.TcasRetryInterval)
 	case "DB2MP4":
+		fmt.Printf("Conf(ExtractChunks): %#v\n", opt.ExtractChunks)
 		fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
 	}
 

@@ -17,6 +17,7 @@ import (
 	"database/sql"
 	_ "github.com/mattn/go-sqlite3"
 	"bytes"
+	"time"
 	"../niconico"
 )
 
@@ -433,6 +434,61 @@ func Convert(fileName string) (err error) {
 }
 
 
+func ExtractChunks(fileName string) (done bool, err error) {
+	db, err := sql.Open("sqlite3", fileName)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+
+	niconico.WriteComment(db, fileName)
+
+	rows, err := db.Query(niconico.SelMedia)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	dir := files.RemoveExtention(fileName)
+	if err = files.MkdirByFileName(dir + "/"); err != nil {
+		return
+	}
+	var printTime int64
+	for rows.Next() {
+		var seqno int64
+		var bw int
+		var size int
+		var data []byte
+		err = rows.Scan(&seqno, &bw, &size, &data)
+		if err != nil {
+			return
+		}
+		name := fmt.Sprintf("%s/%d.ts", dir, seqno)
+		// print
+		now := time.Now().Unix()
+		if now != printTime {
+			printTime = now
+			fmt.Println(name)
+		}
+
+		err = func() (e error) {
+			f, e := os.Create(name)
+			if e != nil {
+				return
+			}
+			defer f.Close()
+			_, e = f.Write(data)
+			return
+		}()
+		if err != nil {
+			return
+		}
+	}
+
+	done = true
+	return
+}
+
 func ConvertDB(fileName, ext string) (done bool, nMp4s int, err error) {
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
@@ -470,6 +526,7 @@ func ConvertDB(fileName, ext string) (done bool, nMp4s int, err error) {
 		if err != nil {
 			return
 		}
+
 		// チャンクが飛んでいる場合はファイルを分ける
 		// BANDWIDTHが変わる場合はファイルを分ける
 		if (prevIndex >= 0 && seqno != prevIndex + 1) || (prevBw >= 0 && bw != prevBw) {
