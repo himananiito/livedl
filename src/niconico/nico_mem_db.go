@@ -17,6 +17,38 @@ func (hls *NicoHls) memdbOpen() (err error) {
 	if err != nil {
 		hls.memdb.Close()
 	}
+
+	if hls.db != nil {
+		rows, e := hls.db.Query(`SELECT * FROM
+			(SELECT seqno, IFNULL(notfound, 0), IFNULL(size, 0) FROM media ORDER BY seqno DESC LIMIT 10) ORDER BY seqno`)
+		if e != nil {
+			err = e
+			return
+		}
+		defer rows.Close()
+
+		var found404 bool
+		for rows.Next() {
+			var seqno int
+			var notfound bool
+			var size int
+			err = rows.Scan(&seqno, &notfound, &size)
+			if err != nil {
+				return
+			}
+			if notfound || size == 0 {
+				hls.memdbSet404(seqno)
+				found404 = true
+			} else {
+				hls.memdbSet200(seqno)
+			}
+			if (! found404) {
+				hls.memdbSetStopBack(seqno)
+				fmt.Printf("debug memdbSetStopBack(%d)\n", seqno)
+			}
+		}
+	}
+
 	return
 }
 

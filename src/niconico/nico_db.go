@@ -269,7 +269,10 @@ func (hls *NicoHls) dbExec(query string, args ...interface{}) {
 
 func (hls *NicoHls) dbKVSet(k string, v interface{}) {
 	query := `INSERT OR REPLACE INTO kvs (k,v) VALUES (?,?)`
-	go hls.dbExec(query, k, v)
+	hls.startDBGoroutine(func(sig chan struct{}) int {
+		hls.dbExec(query, k, v)
+		return OK
+	})
 }
 
 func (hls *NicoHls) dbInsertReplaceOrIgnore(table string, data map[string]interface{}, replace bool) {
@@ -298,7 +301,10 @@ func (hls *NicoHls) dbInsertReplaceOrIgnore(table string, data map[string]interf
 		strings.Join(qs, ","),
 	)
 
-	go hls.dbExec(query, args...)
+	hls.startDBGoroutine(func(sig chan struct{}) int {
+		hls.dbExec(query, args...)
+		return OK
+	})
 }
 
 func (hls *NicoHls) dbInsert(table string, data map[string]interface{}) {

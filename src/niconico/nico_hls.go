@@ -64,6 +64,9 @@ type NicoHls struct {
 	wgMain *sync.WaitGroup
 	chsMaster []chan struct{}
 
+	wgDB *sync.WaitGroup
+	chsDB []chan struct{}
+
 	commentStarted bool
 
 	mtxGoCh sync.Mutex
@@ -93,13 +96,16 @@ type NicoHls struct {
 
 	NicoSession string
 	limitBw int
+	limitBwOrig int
 
 	nicoDebug bool
 	msgErrorCount int
 	msgErrorSeqNo int
 	memdb *sql.DB
 	memdbMtx sync.Mutex
-
+	seqNo500 int
+	cnt500 int
+	bw500 int
 }
 func debug_Now() string {
 	return time.Now().Format("2006/01/02-15:04:05.00")
@@ -248,6 +254,7 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		wgPlaylist: &sync.WaitGroup{},
 		wgComment: &sync.WaitGroup{},
 		wgMain: &sync.WaitGroup{},
+		wgDB: &sync.WaitGroup{},
 
 		quality: "abr",
 		dbName: dbName,
@@ -258,6 +265,7 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 
 		NicoSession: opt.NicoSession,
 		limitBw: opt.NicoLimitBw,
+		limitBwOrig: opt.NicoLimitBw,
 		nicoDebug: opt.NicoDebug,
 	}
 
@@ -400,6 +408,7 @@ return
 	return
 }
 
+// return code
 const (
 	OK = iota
 	INTERRUPT
@@ -422,6 +431,7 @@ const (
 	START_PLAYLIST = iota
 	START_COMMENT
 	START_MASTER
+	START_DB
 )
 func (hls *NicoHls) stopPCGoroutines() {
 	hls.stopPGoroutines()
@@ -621,14 +631,13 @@ func (hls *NicoHls) startGoroutine2(start_t int, f func(chan struct{}) int) {
 
 		switch start_t {
 		case START_PLAYLIST:
-//	fmt.Printf("wgPlaylist.Done() %#v\n", hls.wgPlaylist)
 			hls.wgPlaylist.Done()
 		case START_COMMENT:
-//	fmt.Printf("wgComment.Done() %#v\n", hls.wgComment)
 			hls.wgComment.Done()
 		case START_MASTER:
-///	fmt.Printf("wgMain.Done() %#v\n", hls.wgMain)
 			hls.wgMain.Done()
+		case START_DB:
+			hls.wgDB.Done()
 		}
 
 		hls.checkReturnCode(code)
@@ -650,6 +659,9 @@ func (hls *NicoHls) startGoroutine2(start_t int, f func(chan struct{}) int) {
 //fmt.Printf("wgMain.Add(1) %#v\n", hls.wgMain)
 		hls.wgMain.Add(1)
 		hls.chsMaster = append(hls.chsMaster, stopChan)
+	case START_DB:
+		hls.wgDB.Add(1)
+		hls.chsDB = append(hls.chsDB, stopChan)
 	default:
 		log.Fatalf("[FIXME] not implemented start type = %d\n", start_t)
 	}
@@ -668,6 +680,11 @@ func (hls *NicoHls) startCGoroutine(f func(chan struct{}) int) {
 }
 func (hls *NicoHls) startMGoroutine(f func(chan struct{}) int) {
 	hls.startGoroutine2(START_MASTER, f)
+}
+func (hls *NicoHls) startDBGoroutine(f func(chan struct{}) int) {
+	if (! hls.interrupted()) {
+		hls.startGoroutine2(START_DB, f)
+	}
 }
 
 func (hls *NicoHls) waitRestartMain() bool {
@@ -701,9 +718,13 @@ func (hls *NicoHls) waitCGoroutines() {
 func (hls *NicoHls) waitMGoroutines() {
 	hls.wgMain.Wait()
 }
+func (hls *NicoHls) waitDBGoroutines() {
+	hls.wgDB.Wait()
+}
 func (hls *NicoHls) waitAllGoroutines() {
 	hls.waitPGoroutines()
 	hls.waitCGoroutines()
+	hls.waitDBGoroutines()
 	hls.waitMGoroutines()
 }
 
@@ -1051,8 +1072,8 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr,
 }
 
 func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, neterr, err error) {
-
-	m3u8, code, millisec, err, neterr := getString(argUri.String())
+	u := argUri.String()
+	m3u8, code, millisec, err, neterr := getString(u)
 	if hls.nicoDebug {
 		fmt.Printf("%s:getPlaylist: code=%v, err=%v, neterr=%v, %v(ms) >>>%s<<<\n",
 			debug_Now(), code, err, neterr, millisec, m3u8)
@@ -1065,9 +1086,35 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 	case 403:
 		is403 = true
 		return
-	case 500:
 	default:
 		if 500 <= code && code <= 599 {
+			if strings.Contains(u, "playlist.m3u8") || !strings.Contains(u, "master.m3u8") {
+				if hls.seqNo500 == hls.playlist.seqNo {
+					hls.cnt500++
+					if hls.cnt500 >= 3 {
+						if hls.bw500 == hls.playlist.bandwidth {
+							err = fmt.Errorf("# playlist code=%v, hls.bw500=%v, hls.playlist.bandwidth=%v",
+								code, hls.bw500, hls.playlist.bandwidth,
+							)
+							return
+						} else {
+							hls.bw500 = hls.playlist.bandwidth
+							fmt.Printf("Changing limitBw: %v -> %v\n", hls.limitBw, hls.playlist.bandwidth - 1)
+							hls.limitBw = hls.playlist.bandwidth - 1
+						}
+					}
+				} else {
+					hls.seqNo500 = hls.playlist.seqNo
+					hls.cnt500 = 1
+				}
+			} else {
+				// master.m3u8が500
+				hls.seqNo500 = -1
+				hls.cnt500 = 0
+				hls.bw500 = -1
+				hls.limitBw = hls.limitBwOrig
+			}
+
 			is500 = true
 			return
 		}
@@ -1457,14 +1504,19 @@ func (hls *NicoHls) startMain() {
 
 	// エラー時はMAIN_*を返すこと
 	hls.startPGoroutine(func(sig chan struct{}) int {
-		//fmt.Println(hls.webSocketUrl)
-		//fmt.Printf("startMain: delay is %d\n", hls.startDelay)
+		if hls.nicoDebug {
+			fmt.Printf("%s:startMain: delay = %d(sec)\n", debug_Now(), hls.startDelay)
+		}
+
 		select {
 		case <-time.After(time.Duration(hls.startDelay) * time.Second):
 		case <-sig:
 			return GOT_SIGNAL
 		}
 
+		if hls.nicoDebug {
+			fmt.Printf("%s:start dial main(hls.webSocketUrl)\n", debug_Now(), hls.webSocketUrl)
+		}
 		conn, _, err := websocket.DefaultDialer.Dial(
 			hls.webSocketUrl,
 			map[string][]string{
