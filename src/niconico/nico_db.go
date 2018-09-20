@@ -69,7 +69,6 @@ func (hls *NicoHls) dbCreate() (err error) {
 		current   INTEGER,
 		position  REAL,
 		notfound  INTEGER,
-		noback    INTEGER,
 		bandwidth INTEGER,
 		size      INTEGER,
 		data      BLOB
@@ -143,62 +142,10 @@ func (hls *NicoHls) dbCreate() (err error) {
 		return
 	}
 
-	hls.__dbBegin()
+	//hls.__dbBegin()
 
 	return
 }
-
-//
-/*
-func (hls *NicoHls) dbCheckSequence(seqno int, checkNotFound bool) (res bool) {
-	hls.dbMtx.Lock()
-	defer hls.dbMtx.Unlock()
-
-	if true || hls.nicoDebug {
-		start := time.Now().UnixNano()
-		defer func() {
-			t := (time.Now().UnixNano() - start) / (1000 * 1000)
-			if t > 100 {
-				fmt.Printf("%s:[WARN]dbCheckSequence: %d(ms), %v, %v\n", debug_Now(), t, seqno, checkNotFound)
-			}
-		}()
-	}
-
-	if checkNotFound {
-		hls.db.QueryRow("SELECT size IS NOT NULL OR notfound <> 0 FROM media WHERE seqno=?", seqno).Scan(&res)
-	} else {
-		hls.db.QueryRow("SELECT size IS NOT NULL FROM media WHERE seqno=?", seqno).Scan(&res)
-	}
-	return
-}
-*/
-/*
-func (hls *NicoHls) dbCheckBack(seqno int) (res bool) {
-	hls.dbMtx.Lock()
-	defer hls.dbMtx.Unlock()
-
-	if true || hls.nicoDebug {
-		start := time.Now().UnixNano()
-		defer func() {
-			t := (time.Now().UnixNano() - start) / (1000 * 1000)
-			if t > 100 {
-				fmt.Printf("%s:[WARN]dbCheckBack: %d(ms), %v\n", debug_Now(), t, seqno)
-			}
-		}()
-	}
-
-	hls.db.QueryRow("SELECT noback <> 0 OR notfound <> 0 FROM media WHERE seqno=?", seqno).Scan(&res)
-	return
-}
-*/
-/*
-func (hls *NicoHls) dbMarkNoBack(seqno int) {
-	hls.dbExec(`
-		INSERT OR IGNORE INTO media (seqno, noback) VALUES(?, 1);
-		UPDATE media SET noback = 1 WHERE seqno=?
-	`, seqno, seqno)
-}
-*/
 
 // timeshift
 func (hls *NicoHls) dbSetPosition() {
@@ -217,13 +164,13 @@ func (hls *NicoHls) dbGetLastPosition() (res float64) {
 	return
 }
 
-func (hls *NicoHls) __dbBegin() {
-	return
+//func (hls *NicoHls) __dbBegin() {
+//	return
 	///////////////////////////////////////////
 	//hls.db.Exec(`BEGIN TRANSACTION`)
-}
-func (hls *NicoHls) __dbCommit(t time.Time) {
-	return
+//}
+//func (hls *NicoHls) __dbCommit(t time.Time) {
+//	return
 	///////////////////////////////////////////
 
 	//// Never hls.dbMtx.Lock()
@@ -233,12 +180,12 @@ func (hls *NicoHls) __dbCommit(t time.Time) {
 	//	log.Printf("Commit: %s\n", hls.dbName)
 	//}
 	//hls.lastCommit = t
-}
+//}
 func (hls *NicoHls) dbCommit() {
-	hls.dbMtx.Lock()
-	defer hls.dbMtx.Unlock()
+//	hls.dbMtx.Lock()
+//	defer hls.dbMtx.Unlock()
 
-	hls.__dbCommit(time.Now())
+//	hls.__dbCommit(time.Now())
 }
 func (hls *NicoHls) dbExec(query string, args ...interface{}) {
 	hls.dbMtx.Lock()
@@ -260,11 +207,6 @@ func (hls *NicoHls) dbExec(query string, args ...interface{}) {
 		hls.db.Close()
 		os.Exit(1)
 	}
-
-	//now := time.Now()
-	//if now.After(hls.lastCommit.Add(15 * time.Second)) {
-	//	hls.__dbCommit(now)
-	//}
 }
 
 func (hls *NicoHls) dbKVSet(k string, v interface{}) {

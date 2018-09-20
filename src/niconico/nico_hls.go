@@ -65,7 +65,7 @@ type NicoHls struct {
 	chsMaster []chan struct{}
 
 	wgDB *sync.WaitGroup
-	chsDB []chan struct{}
+	//chsDB []chan struct{}
 
 	commentStarted bool
 
@@ -106,9 +106,11 @@ type NicoHls struct {
 	seqNo500 int
 	cnt500 int
 	bw500 int
+
+	mtxWg sync.Mutex
 }
 func debug_Now() string {
-	return time.Now().Format("2006/01/02-15:04:05.00")
+	return time.Now().Format("2006/01/02-15:04:05")
 }
 func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err error) {
 
@@ -124,11 +126,7 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		return
 	}
 
-	myUserId, ok := prop["//myId"].(string)
-	if !ok {
-		err = fmt.Errorf("userId is not string")
-		return
-	}
+	myUserId, _ := prop["//myId"].(string)
 	if myUserId == "" {
 		myUserId = "NaN"
 	}
@@ -362,49 +360,6 @@ func (hls *NicoHls) commentHandler(tag string, attr interface{}) (err error) {
 		}
 	}
 
-return
-
-/*
-	var contentExists bool
-	var content string
-
-	var keys []string
-	for k, v := range attrMap {
-		if k == "content" {
-			contentExists = true
-			content = fmt.Sprintf("%v", v)
-			content = strings.Replace(content, "&", "&amp;", -1)
-			content = strings.Replace(content, "<", "&lt;", -1)
-
-		} else {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
-
-	tagAttrs := []string{tag}
-	for _, k := range keys {
-		var vStr string
-		switch v := attrMap[k].(type) {
-		case float64: vStr = fmt.Sprintf("%d", int(v))
-		default: vStr = fmt.Sprintf("%v", v)
-		}
-		vStr = strings.Replace(vStr, `"`, "&quot;", -1)
-		tagAttrs = append(tagAttrs, fmt.Sprintf(`%s="%s"`, k, vStr))
-	}
-	tagAttr := strings.Join(tagAttrs, " ")
-
-	var line string
-	if contentExists {
-		line = fmt.Sprintf("<%s>%s</%s>\r\n", tagAttr, content, tag)
-	} else {
-		line = fmt.Sprintf("<%s/>\r\n", tagAttr)
-	}
-
-	if err = hls.writeComment(line); err != nil {
-		return
-	}
-*/
 	return
 }
 
@@ -416,6 +371,7 @@ const (
 	MAIN_DISCONNECT
 	MAIN_END_PROGRAM
 	MAIN_INVALID_STREAM_QUALITY
+	MAIN_TEMPORARILY_ERROR
 	PLAYLIST_END
 	PLAYLIST_403
 	PLAYLIST_ERROR
@@ -447,7 +403,8 @@ func (hls *NicoHls) stopPGoroutines() {
 	defer hls.mtxGoCh.Unlock()
 
 	for _, c := range hls.chsPlaylist {
-		c <-struct{}{}
+		//c <-struct{}{}
+		close(c)
 	}
 	hls.chsPlaylist = []chan struct{}{}
 }
@@ -456,7 +413,8 @@ func (hls *NicoHls) stopCGoroutines() {
 	defer hls.mtxGoCh.Unlock()
 
 	for _, c := range hls.chsComment {
-		c <-struct{}{}
+		//c <-struct{}{}
+		close(c)
 	}
 	hls.chsComment = []chan struct{}{}
 }
@@ -465,7 +423,8 @@ func (hls *NicoHls) stopMGoroutines() {
 	defer hls.mtxGoCh.Unlock()
 
 	for _, c := range hls.chsMaster {
-		c <-struct{}{}
+		//c <-struct{}{}
+		close(c)
 	}
 	hls.chsMaster = []chan struct{}{}
 }
@@ -535,7 +494,7 @@ func (hls *NicoHls) checkReturnCode(code int) {
 
 	// NEVER restart goroutines here except interrupt handler
 	switch code {
-	case NETWORK_ERROR:
+	case NETWORK_ERROR, MAIN_TEMPORARILY_ERROR:
 		delay := hls.getStartDelay()
 		if delay < 1 {
 			hls.markRestartMain(1)
@@ -616,20 +575,12 @@ func (hls *NicoHls) checkReturnCode(code int) {
 	case OK:
 	}
 }
-func (hls *NicoHls) startGoroutine2(start_t int, f func(chan struct{}) int) {
+func (hls *NicoHls) wgAddOrDone(startType int, done bool) {
+	hls.mtxWg.Lock()
+	defer hls.mtxWg.Unlock()
 
-	stopChan := make(chan struct{}, 10)
-
-	//if runtime.NumGoroutine() > 100 {
-	//	log.Fatalln("too many goroutines")
-	//}
-
-	go func(start_t int){
-		//fmt.Printf("goroutine started: %d\n", start_t)
-		code := f(stopChan)
-		//fmt.Printf("ret goroutine: %d -> %d\n", start_t, code)
-
-		switch start_t {
+	if done {
+		switch startType {
 		case START_PLAYLIST:
 			hls.wgPlaylist.Done()
 		case START_COMMENT:
@@ -639,51 +590,73 @@ func (hls *NicoHls) startGoroutine2(start_t int, f func(chan struct{}) int) {
 		case START_DB:
 			hls.wgDB.Done()
 		}
+	} else {
+		switch startType {
+		case START_PLAYLIST:
+			hls.wgPlaylist.Add(1)
+		case START_COMMENT:
+			hls.wgComment.Add(1)
+		case START_MASTER:
+			hls.wgMain.Add(1)
+		case START_DB:
+			hls.wgDB.Add(1)
+		}
+	}
+}
+func (hls *NicoHls) wgStart(startType int) {
+	hls.wgAddOrDone(startType, false)
+}
+func (hls *NicoHls) wgDone(startType int) {
+	hls.wgAddOrDone(startType, true)
+}
+func (hls *NicoHls) startGoroutine(start_t int, f func(chan struct{}) int) {
+	hls.wgStart(start_t)
+	stopChan := make(chan struct{}, 10)
 
+	func() {
+		hls.mtxGoCh.Lock()
+		defer hls.mtxGoCh.Unlock()
+
+		switch start_t {
+		case START_PLAYLIST:
+			hls.chsPlaylist = append(hls.chsPlaylist, stopChan)
+		case START_COMMENT:
+			hls.chsComment = append(hls.chsComment, stopChan)
+		case START_MASTER:
+			hls.chsMaster = append(hls.chsMaster, stopChan)
+		case START_DB:
+			//hls.chsDB = append(hls.chsDB, stopChan)
+		}
+	}()
+
+	//if runtime.NumGoroutine() > 100 {
+	//	log.Fatalln("too many goroutines")
+	//}
+
+	go func(start_t int){
+		code := f(stopChan)
+		hls.wgDone(start_t)
 		hls.checkReturnCode(code)
 	}(start_t)
-
-	hls.mtxGoCh.Lock()
-	defer hls.mtxGoCh.Unlock()
-
-	switch start_t {
-	case START_PLAYLIST:
-//fmt.Printf("wgPlaylist.Add(1) %#v\n", hls.wgPlaylist)
-		hls.wgPlaylist.Add(1)
-		hls.chsPlaylist = append(hls.chsPlaylist, stopChan)
-	case START_COMMENT:
-//fmt.Printf("wgComment.Add(1) %#v\n", hls.wgComment)
-		hls.wgComment.Add(1)
-		hls.chsComment = append(hls.chsComment, stopChan)
-	case START_MASTER:
-//fmt.Printf("wgMain.Add(1) %#v\n", hls.wgMain)
-		hls.wgMain.Add(1)
-		hls.chsMaster = append(hls.chsMaster, stopChan)
-	case START_DB:
-		hls.wgDB.Add(1)
-		hls.chsDB = append(hls.chsDB, stopChan)
-	default:
-		log.Fatalf("[FIXME] not implemented start type = %d\n", start_t)
-	}
 }
 // Of playlist
 func (hls *NicoHls) startPGoroutine(f func(chan struct{}) int) {
 	if (! hls.interrupted()) {
-		hls.startGoroutine2(START_PLAYLIST, f)
+		hls.startGoroutine(START_PLAYLIST, f)
 	}
 }
 // Of comment
 func (hls *NicoHls) startCGoroutine(f func(chan struct{}) int) {
 	if (! hls.interrupted()) {
-		hls.startGoroutine2(START_COMMENT, f)
+		hls.startGoroutine(START_COMMENT, f)
 	}
 }
 func (hls *NicoHls) startMGoroutine(f func(chan struct{}) int) {
-	hls.startGoroutine2(START_MASTER, f)
+	hls.startGoroutine(START_MASTER, f)
 }
 func (hls *NicoHls) startDBGoroutine(f func(chan struct{}) int) {
 	if (! hls.interrupted()) {
-		hls.startGoroutine2(START_DB, f)
+		hls.startGoroutine(START_DB, f)
 	}
 }
 
@@ -971,13 +944,45 @@ func urlJoin(base *url.URL, uri string) (res *url.URL, err error) {
 	return
 }
 
-func getString(uri string) (s string, code int, t int64, err, neterr error) {
+func getStringBase(uri string, header map[string]string) (s string, code int, t int64, err, neterr error) {
 	start := time.Now().UnixNano()
 	defer func() {
 		t = (time.Now().UnixNano() - start) / (1000 * 1000)
 	}()
 
-	resp, err, neterr := httpbase.Get(uri, nil)
+	resp, err, neterr := httpbase.Get(uri, header)
+	if err != nil {
+		return
+	}
+	if neterr != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	bs, neterr := ioutil.ReadAll(resp.Body)
+	if neterr != nil {
+		return
+	}
+
+	s = string(bs)
+
+	code = resp.StatusCode
+
+	return
+}
+func getString(uri string) (s string, code int, t int64, err, neterr error) {
+	return getStringBase(uri, nil)
+}
+func getStringHeader(uri string, header map[string]string) (s string, code int, t int64, err, neterr error) {
+	return getStringBase(uri, header)
+}
+func postStringHeader(uri string, header map[string]string, val url.Values) (s string, code int, t int64, err, neterr error) {
+	start := time.Now().UnixNano()
+	defer func() {
+		t = (time.Now().UnixNano() - start) / (1000 * 1000)
+	}()
+
+	resp, err, neterr := httpbase.PostForm(uri, header, val)
 	if err != nil {
 		return
 	}
@@ -1025,10 +1030,18 @@ func getBytes(uri string) (code int, buff []byte, t int64, err, neterr error) {
 
 func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr, err error) {
 
+	if hls.nicoDebug {
+		start := time.Now().UnixNano()
+		defer func() {
+			t := (time.Now().UnixNano() - start) / (1000 * 1000)
+			fmt.Printf("%s:saveMedia: seqno=%d, total %d(ms)\n", debug_Now(), seqno, t)
+		}()
+	}
+
 	code, buff, millisec, err, neterr := getBytes(uri)
 	defer func(){buff = nil}()
 	if hls.nicoDebug {
-		fmt.Printf("%s:saveMedia: seqno=%d, code=%v, err=%v, neterr=%v, %v(ms), len=%v\n",
+		fmt.Printf("%s:getBytes@saveMedia: seqno=%d, code=%v, err=%v, neterr=%v, %v(ms), len=%v\n",
 			debug_Now(), seqno, code, err, neterr, millisec, len(buff))
 	}
 	if err != nil || neterr != nil {
@@ -1081,6 +1094,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 	if err != nil || neterr != nil {
 		return
 	}
+
 	switch code {
 	case 200:
 	case 403:
@@ -1269,6 +1283,9 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 		maxSeq := -1
 		if (! hls.isTimeshift) && (! hls.playlist.withoutFormat) {
 			// 404になるまで後ろに戻ってチャンクを取得する
+			if hls.nicoDebug {
+				fmt.Printf("%s:start chunks(back)\n", debug_Now())
+			}
 			for i := hls.playlist.seqNo - 1; i >= 0; i-- {
 				if hls.memdbGetStopBack(i) {
 					break
@@ -1304,6 +1321,9 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 		}
 
 		// m3u8の通りにチャンクを取得する
+		if hls.nicoDebug {
+			fmt.Printf("%s:start chunks(normal)\n", debug_Now())
+		}
 		var found404 bool
 		for _, seq := range seqlist {
 			if hls.memdbCheck200(seq.seqno) {
@@ -1341,7 +1361,6 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 				hls.memdbSetStopBack(i)
 			}
 			hls.memdbDelete(hls.playlist.seqNo)
-			//fmt.Printf("memdbCount: %v\n", hls.memdbCount())
 		}
 
 		if strings.Contains(m3u8, "#EXT-X-ENDLIST") {
@@ -1515,7 +1534,7 @@ func (hls *NicoHls) startMain() {
 		}
 
 		if hls.nicoDebug {
-			fmt.Printf("%s:start dial main(hls.webSocketUrl)\n", debug_Now(), hls.webSocketUrl)
+			fmt.Printf("%s:start dial main(%s)\n", debug_Now(), hls.webSocketUrl)
 		}
 		conn, _, err := websocket.DefaultDialer.Dial(
 			hls.webSocketUrl,
@@ -1686,13 +1705,17 @@ func (hls *NicoHls) startMain() {
 							fmt.Printf("%v\n", arr)
 							if len(arr) >= 2 {
 								if s, ok := arr[1].(string); ok {
-									if s == "END_PROGRAM" {
+									switch s {
+									case "END_PROGRAM":
 										return MAIN_END_PROGRAM
+									case "SERVICE_TEMPORARILY_UNAVAILABLE", "INTERNAL_SERVERERROR":
+										return MAIN_TEMPORARILY_ERROR
+									case "TOO_MANY_CONNECTIONS":
+										return MAIN_DISCONNECT
 									}
 								}
 							}
 						}
-						//chDone <-true
 						return MAIN_DISCONNECT
 
 					case "currentroom":
@@ -1894,86 +1917,193 @@ func (hls *NicoHls) Wait(testTimeout, hlsPort int) {
 	return
 }
 
-func getProps(opt options.Option) (props interface{}, notLogin bool, err error) {
-	formats := []string{
-		"http://live2.nicovideo.jp/watch/%s",
-		"http://live.nicovideo.jp/watch/%s",
+func postTsRsv0(opt options.Option) (err error) {
+	if ma := regexp.MustCompile(`lv(\d+)`).FindStringSubmatch(opt.NicoLiveId); len(ma) > 0 {
+		if err = postTsRsvBase(0, ma[1], opt.NicoSession); err != nil {
+			return
+		}
+		err = postTsRsvBase(1, ma[1], opt.NicoSession)
+	}
+	return
+}
+func postTsRsv1(opt options.Option) (err error) {
+	if ma := regexp.MustCompile(`lv(\d+)`).FindStringSubmatch(opt.NicoLiveId); len(ma) > 0 {
+		err = postTsRsvBase(1, ma[1], opt.NicoSession)
+	}
+	return
+}
+func postTsRsvBase(num int, vid, session string) (err error) {
+	var uri string
+	if num == 0 {
+		uri = fmt.Sprintf("http://live.nicovideo.jp/api/watchingreservation?mode=watch_num&vid=%s", vid)
+	} else {
+		uri = fmt.Sprintf("http://live.nicovideo.jp/api/watchingreservation?mode=confirm_watch_my&vid=%s", vid)
 	}
 
-	for i, format := range formats {
-		uri := fmt.Sprintf(format, opt.NicoLiveId)
-		req, _ := http.NewRequest("GET", uri, nil)
-		if opt.NicoSession != "" {
-			req.Header.Set("Cookie", "user_session=" + opt.NicoSession)
+	header := map[string]string{
+		"Cookie": "user_session=" + session,
+	}
+	dat0, _, _, err, neterr := getStringHeader(uri, header)
+	if err != nil || neterr != nil {
+		if err == nil {
+			err = neterr
 		}
-		req.Header.Set("User-Agent", httpbase.GetUserAgent())
+		return
+	}
 
-		client := new(http.Client)
-		var redirect bool
-		var skip bool
-		client.CheckRedirect = func(req *http.Request, via []*http.Request) (err error) {
-			//fmt.Printf("redirect to %v\n", req.URL.String())
-			// リダイレクトが走ったらHLSでは不可とみなす
-			// --> cas.nicovideoかもしれない
-			if regexp.MustCompile(`\Ahttps?://cas\.nicovideo\.jp/user/.*`).MatchString(req.URL.String()) {
-				redirect = false
-			} else if i == 0 && regexp.MustCompile(`\Ahttps?://live\.nicovideo\.jp/gate/.*`).MatchString(req.URL.String()) {
-				skip = true
-			} else {
-				redirect = true
-			}
-			return nil
+	var token string
+	if ma := regexp.MustCompile(
+	`TimeshiftActions\.(?:doRegister|confirmToWatch)\(['"].*?['"]\s*,\s*['"](.+?)['"]`).
+	FindStringSubmatch(dat0); len(ma) > 0 {
+		token = ma[1]
+	} else if strings.Contains(dat0, "視聴済み") {
+		err = fmt.Errorf("postTsRsv: already watched")
+		return
+	} else {
+		fmt.Printf("postTsRsv: token not found: >>>%s<<<\n", dat0)
+		err = fmt.Errorf("postTsRsv: token not found")
+		return
+	}
+
+	// "X-Requested-With": "XMLHttpRequest",
+	// "Origin": "http://live.nicovideo.jp",
+	// "Referer": fmt.Sprintf("http://live.nicovideo.jp/gate/%s", opt.NicoLiveId),
+	// "X-Prototype-Version": "1.6.0.3",
+
+	var vals url.Values
+	if num == 0 {
+		vals = url.Values{
+			"mode": []string{"overwrite"},
+			"vid": []string{vid},
+			"token": []string{token},
+			"rec_pos": []string{""},
+			"rec_engine": []string{""},
+			"rec_id": []string{""},
+			"_": []string{""},
 		}
-		resp, e := client.Do(req)
-		if e != nil {
-			err = e
+	} else {
+		vals = url.Values{
+			"accept": []string{"true"},
+			"mode": []string{"use"},
+			"vid": []string{vid},
+			"token": []string{token},
+			"_": []string{""},
+		}
+	}
+
+	dat1, _, _, err, neterr := postStringHeader("http://live.nicovideo.jp/api/watchingreservation", header, vals)
+	if err != nil || neterr != nil {
+		if err == nil {
+			err = neterr
+		}
+		return
+	}
+	if (! strings.Contains(dat1, "status=\"ok\"")) && (! strings.Contains(dat1, "\"regist_finished\"")) {
+		fmt.Printf("postTsRsv: status not ok: >>>%s<<<\n", dat1)
+		err = fmt.Errorf("postTsRsv: status not ok")
+		return
+	}
+
+	return
+}
+
+func getProps(opt options.Option) (props interface{}, isFlash, notLogin, tsRsv0, tsRsv1 bool, err error) {
+
+	header := map[string]string{}
+	if opt.NicoSession != "" {
+		header["Cookie"] = "user_session=" + opt.NicoSession
+	}
+
+	uri := fmt.Sprintf("http://live2.nicovideo.jp/watch/%s", opt.NicoLiveId)
+	dat, _, _, err, neterr := getStringHeader(uri, header)
+	if err != nil || neterr != nil {
+		if err == nil {
+			err = neterr
+		}
+		return
+	}
+
+	// ログイン判定
+	if opt.NicoSession == "" {
+		notLogin = true
+	} else if ma := regexp.MustCompile(`login_status['"]*\s*[=:]\s*['"](.*?)['"]`).FindStringSubmatch(dat); len(ma) > 0 {
+		switch string(ma[1]) {
+		case "not_login":
+			notLogin = true
+		case "login":
+			notLogin = false
+		default:
+			fmt.Printf("[FIXME] login_status = %s\n", ma[1])
+		}
+	} else {
+		notLogin = true
+	}
+
+	// 新配信 + nicocas
+	if ma := regexp.MustCompile(`data-props="(.+?)"`).FindStringSubmatch(dat); len(ma) > 0 {
+		str := html.UnescapeString(string(ma[1]))
+		if err = json.Unmarshal([]byte(str), &props); err != nil {
 			return
 		}
-		if skip {
-			resp.Body.Close()
-			continue
-		}
-		defer resp.Body.Close()
-
-		dat, _ := ioutil.ReadAll(resp.Body)
-
-		if redirect {
+		return
+	} else if strings.Contains(dat, "nicoliveplayer.swf") {
+	// 旧Flashプレイヤー
+		isFlash = true
+	} else if regexp.MustCompile(`この番組は.{1,50}に終了`).MatchString(dat) {
+		// タイムシフト予約ボタン
+		if ma := regexp.MustCompile(`Nicolive\.WatchingReservation\.register`).FindStringSubmatch(dat); len(ma) > 0 {
+			fmt.Printf("timeshift reservation required\n")
+			tsRsv0 = true
 			return
 		}
-
-
-		if ma := regexp.MustCompile(`data-props="(.+?)"`).FindSubmatch(dat); len(ma) > 0 {
-			str := html.UnescapeString(string(ma[1]))
-			if err = json.Unmarshal([]byte(str), &props); err != nil {
-				return
-			}
+		if ma := regexp.MustCompile(`Nicolive\.WatchingReservation\.confirm`).FindStringSubmatch(dat); len(ma) > 0 {
+			fmt.Printf("timeshift reservation required\n")
+			tsRsv1 = true
 			return
-
-		} else if ma := regexp.MustCompile(`user\.login_status\s*=\s*['"](.*?)['"]`).FindSubmatch(dat); len(ma) > 0 {
-			switch string(ma[1]) {
-			case "not_login":
-				notLogin = true
-			case "login":
-				notLogin = false
-				return
-			}
 		}
 	}
 
 	return
 }
 
-func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin bool, dbName string, err error) {
+func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin, reserved bool, dbName string, err error) {
 
 	//http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 32
 
-	var props interface{}
-	props, notLogin, err = getProps(opt)
+	//var props interface{}
+	//var isFlash bool
+	//var tsRsv bool
+	props, isFlash, notLogin, tsRsv0, tsRsv1, err := getProps(opt)
 	if err != nil {
 		//fmt.Println(err)
 		return
 	}
+
 	if notLogin {
+		if opt.NicoLoginOnly {
+			// 要ログイン
+			return
+		} else {
+			// 非ログインでも録画可能なら再ログイン不要
+			notLogin = false
+		}
+	}
+
+	// TS予約必要
+	if (tsRsv0 || tsRsv1) && opt.NicoForceResv {
+		if tsRsv0 {
+			err = postTsRsv0(opt)
+		} else {
+			err = postTsRsv1(opt)
+		}
+		if err == nil {
+			reserved = true
+		}
+		return
+	}
+
+	if isFlash {
+		fmt.Println("Flash page detected.")
 		return
 	}
 
@@ -1983,6 +2113,9 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin bool, dbName st
 	}
 
 	proplist := map[string][]string{
+		// "broadcaster" // nicocas
+		"cas-userName": []string{"broadcaster", "nickname"}, // ユーザ名
+		"cas-userPageUrl": []string{"broadcaster", "pageUrl"}, // "http://www.nicovideo.jp/user/\d+"
 		// "community"
 		"comId": []string{"community", "id"}, // "co\d+"
 		// "program"
@@ -2001,6 +2134,7 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin bool, dbName st
 		"userPageUrl": []string{"program", "supplier", "pageUrl"}, // "http://www.nicovideo.jp/user/\d+"
 		"title": []string{"program", "title"}, // title
 		// "site"
+		"nicocas": []string{"site", "nicocas"}, //
 		"//webSocketUrl": []string{"site", "relive", "webSocketUrl"}, // "ws://..."
 		"serverTime": []string{"site", "serverTime"}, // integer
 		// "socialGroup"
@@ -2021,34 +2155,48 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin bool, dbName st
 		v, ok := obj.FindVal(props, a...)
 		if ok {
 			kv[k] = v
-		} else {
-			//kv[k] = nil
 		}
 	}
 
-	for _, k := range []string{
-		"broadcastId",
-		"//webSocketUrl",
-		"//myId",
-	} {
-		if _, ok := kv[k]; !ok {
-			fmt.Printf("%v not found\n", k)
+	var nicocas bool
+	if _, ok := kv["nicocas"]; ok {
+		nicocas = true
+	}
+
+	if nicocas {
+		fmt.Println("nicocas not supported.")
+		return
+
+	} else {
+		for _, k := range []string{
+			"broadcastId",
+			"//webSocketUrl",
+			//"//myId",
+		} {
+			if _, ok := kv[k]; !ok {
+				fmt.Printf("%v not found\n", k)
+				return
+			}
+		}
+
+		if opt.NicoFormat == "" {
+			opt.NicoFormat = "?PID?-?UNAME?-?TITLE?"
+		}
+
+		hls, e := NewHls(opt, kv)
+		if e != nil {
+			err = e
+			fmt.Println(err)
 			return
 		}
-	}
+		defer hls.Close()
 
-	if opt.NicoFormat == "" {
-		opt.NicoFormat = "?PID?-?UNAME?-?TITLE?"
-	}
+		hls.Wait(opt.NicoTestTimeout, opt.NicoHlsPort)
 
-	hls, e := NewHls(opt, kv)
-	if e != nil {
-		err = e
-		fmt.Println(err)
-		return
+		dbName = hls.dbName
+		playlistEnd = hls.finish
+		done = true
 	}
-	defer hls.Close()
-
 
 /*
 	pageUrl, _ := obj.FindString(props, "broadcaster", "pageUrl")
@@ -2065,15 +2213,6 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin bool, dbName st
 			fmt.Printf("nickname not found")
 		}
 
-		communityId, ok := obj.FindString(props, "community", "id")
-		if ! ok {
-			fmt.Printf("communityId not found")
-		}
-
-		status, ok := obj.FindString(props, "program", "status")
-		if ! ok {
-			fmt.Printf("status not found")
-		}
 		var isArchive bool
 		switch status {
 			case "ENDED":
@@ -2083,23 +2222,7 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin bool, dbName st
 	}
 
 	log4gui.Info(fmt.Sprintf("isLoggedIn: %v, user_id: %s, nickname: %s", isLoggedIn, user_id, nickname))
-
-	if opt.NicoLoginOnly {
-		if isLoggedIn && user_id != "" {
-			// login OK
-		} else {
-			notLogin = true
-			return
-		}
-	}
-
 */
-
-	hls.Wait(opt.NicoTestTimeout, opt.NicoHlsPort)
-
-	dbName = hls.dbName
-	playlistEnd = hls.finish
-	done = true
 
 	return
 }

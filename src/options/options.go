@@ -49,6 +49,7 @@ type Option struct {
 	NicoDebug bool // デバッグ情報の記録
 	ConvExt string
 	ExtractChunks bool
+	NicoForceResv bool // 終了番組の上書きタイムシフト予約
 }
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
@@ -91,7 +92,8 @@ COMMAND:
 ニコニコ生放送録画用オプション:
   -nico-login <id>,<password>    (+) ニコニコのIDとパスワードを指定する
   -nico-session <session>        Cookie[user_session]を指定する
-  -nico-login-only               非ログインで視聴可能の番組でも必ずログイン状態で録画する
+  -nico-login-only=on            (+) 必ずログイン状態で録画する
+  -nico-login-only=off           (+) 非ログインでも録画可能とする(デフォルト)
   -nico-hls-only                 録画時にHLSのみを試す
   -nico-hls-only=on              (+) 上記を有効に設定
   -nico-hls-only=off             (+) 上記を無効に設定
@@ -111,6 +113,8 @@ COMMAND:
   -nico-auto-delete-mode 0       (+) 自動変換後にデータベースファイルを削除しないように設定
   -nico-auto-delete-mode 1       (+) 自動変換でMP4が分割されなかった場合のみ削除するように設定
   -nico-auto-delete-mode 2       (+) 自動変換でMP4が分割されても削除するように設定
+  -nico-force-reservation=on     (+) 視聴にタイムシフト予約が必要な場合に自動的に上書きする
+  -nico-force-reservation=off    (+) 自動的にタイムシフト予約しない(デフォルト)
 
 ツイキャス録画用オプション
   -tcas-retry=on                 (+) 録画終了後に再試行を行う
@@ -169,6 +173,7 @@ func SetNicoLogin(hash, user, pass string) (err error) {
 	if err != nil {
 		fmt.Println(err)
 	}
+	fmt.Printf("niconico account saved.\n")
 	return
 }
 func SetNicoSession(hash, session string) (err error) {
@@ -290,6 +295,7 @@ func ParseArgs() (opt Option) {
 		SELECT
 		IFNULL((SELECT v FROM conf WHERE k == "NicoFormat"), ""),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoLimitBw"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoLoginOnly"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoHlsOnly"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoRtmpOnly"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoFastTs"), 0),
@@ -300,10 +306,12 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryTimeoutMinute"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryInterval"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "ConvExt"), ""),
-		IFNULL((SELECT v FROM conf WHERE k == "ExtractChunks"), 0)
+		IFNULL((SELECT v FROM conf WHERE k == "ExtractChunks"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoForceResv"), 0)
 	`).Scan(
 		&opt.NicoFormat,
 		&opt.NicoLimitBw,
+		&opt.NicoLoginOnly,
 		&opt.NicoHlsOnly,
 		&opt.NicoRtmpOnly,
 		&opt.NicoFastTs,
@@ -315,6 +323,7 @@ func ParseArgs() (opt Option) {
 		&opt.TcasRetryInterval,
 		&opt.ConvExt,
 		&opt.ExtractChunks,
+		&opt.NicoForceResv,
 	)
 	if err != nil {
 		log.Println(err)
@@ -462,8 +471,16 @@ func ParseArgs() (opt Option) {
 			opt.Command = "DB2MP4"
 			return nil
 		}},
-		Parser{regexp.MustCompile(`\A(?i)--?nico-?login-?only\z`), func() error {
-			opt.NicoLoginOnly = true
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?login-?only(?:=(on|off))?\z`), func() error {
+			if strings.EqualFold(match[1], "on") {
+				opt.NicoLoginOnly = true
+				dbConfSet(db, "NicoLoginOnly", opt.NicoLoginOnly)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.NicoLoginOnly = false
+				dbConfSet(db, "NicoLoginOnly", opt.NicoLoginOnly)
+			} else {
+				opt.NicoLoginOnly = true
+			}
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?hls-?only(?:=(on|off))?\z`), func() error {
@@ -712,6 +729,15 @@ func ParseArgs() (opt Option) {
 			dbConfSet(db, "ExtractChunks", opt.ExtractChunks)
 			return nil
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?force-?(?:resv|reservation)(?:=(on|off))\z`), func() error {
+			if strings.EqualFold(match[1], "on") {
+				opt.NicoForceResv = true
+			} else if strings.EqualFold(match[1], "off") {
+				opt.NicoForceResv = false
+			}
+			dbConfSet(db, "NicoForceResv", opt.NicoForceResv)
+			return nil
+		}},
 	}
 
 	checkFILE := func(arg string) bool {
@@ -819,6 +845,7 @@ func ParseArgs() (opt Option) {
 	// prints
 	switch opt.Command {
 	case "NICOLIVE":
+		fmt.Printf("Conf(NicoLoginOnly): %#v\n", opt.NicoLoginOnly)
 		fmt.Printf("Conf(NicoFormat): %#v\n", opt.NicoFormat)
 		fmt.Printf("Conf(NicoLimitBw): %#v\n", opt.NicoLimitBw)
 		fmt.Printf("Conf(NicoHlsOnly): %#v\n", opt.NicoHlsOnly)
@@ -830,6 +857,7 @@ func ParseArgs() (opt Option) {
 			fmt.Printf("Conf(ExtractChunks): %#v\n", opt.ExtractChunks)
 			fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
 		}
+		fmt.Printf("Conf(NicoForceResv): %#v\n", opt.NicoForceResv)
 
 	case "TWITCAS":
 		fmt.Printf("Conf(TcasRetry): %#v\n", opt.TcasRetry)

@@ -70,7 +70,8 @@ func Record(opt options.Option) (hlsPlaylistEnd bool, dbName string, err error) 
 		if (! opt.NicoRtmpOnly) {
 			var done bool
 			var notLogin bool
-			done, hlsPlaylistEnd, notLogin, dbName, err = NicoRecHls(opt)
+			var reserved bool
+			done, hlsPlaylistEnd, notLogin, reserved, dbName, err = NicoRecHls(opt)
 			if done {
 				return
 			}
@@ -82,6 +83,9 @@ func Record(opt options.Option) (hlsPlaylistEnd bool, dbName string, err error) 
 				if err = NicoLogin(opt); err != nil {
 					return
 				}
+				continue
+			}
+			if reserved {
 				continue
 			}
 		}

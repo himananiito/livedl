@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+	"errors"
 	"../buildno"
 	"../defines"
 )
@@ -22,6 +23,15 @@ func GetUserAgent() string {
 
 var Client = &http.Client{
 	Timeout: time.Duration(5) * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) (err error) {
+		if req != nil && via != nil && len(via) > 0 {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			req.Header = via[0].Header
+		}
+		return nil
+	},
 }
 func httpBase(method, uri string, header map[string]string, body io.Reader) (resp *http.Response, err, neterr error) {
 
