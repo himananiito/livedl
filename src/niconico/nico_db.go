@@ -196,7 +196,7 @@ func (hls *NicoHls) dbExec(query string, args ...interface{}) {
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Printf("%s:[WARN]dbExec: %d(ms):%s\n", debug_Now(), t, query)
+				fmt.Fprintf(os.Stderr, "%s:[WARN]dbExec: %d(ms):%s\n", debug_Now(), t, query)
 			}
 		}()
 	}

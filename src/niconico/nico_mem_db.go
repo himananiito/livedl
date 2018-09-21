@@ -3,6 +3,7 @@ package niconico
 import (
 	"fmt"
 	"time"
+	"os"
 	"database/sql"
 )
 
@@ -46,7 +47,7 @@ func (hls *NicoHls) memdbOpen() (err error) {
 			if (! found404) {
 				hls.memdbSetStopBack(seqno)
 				if hls.nicoDebug {
-					fmt.Printf("memdbSetStopBack(%d)\n", seqno)
+					fmt.Fprintf(os.Stderr, "memdbSetStopBack(%d)\n", seqno)
 				}
 			}
 		}
@@ -89,7 +90,7 @@ func (hls *NicoHls) memdbSetStopBack(seqno int) {
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Printf("%s:[WARN]memdbSetStopBack: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbSetStopBack: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
@@ -111,7 +112,7 @@ func (hls *NicoHls) memdbGetStopBack(seqno int) (res bool) {
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Printf("%s:[WARN]memdbGetStopBack: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbGetStopBack: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
@@ -128,7 +129,7 @@ func (hls *NicoHls) memdbSet200(seqno int) {
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Printf("%s:[WARN]memdbSet200: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbSet200: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
@@ -144,7 +145,7 @@ func (hls *NicoHls) memdbSet404(seqno int) {
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Printf("%s:[WARN]memdbSet404: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbSet404: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
@@ -160,7 +161,7 @@ func (hls *NicoHls) memdbCheck200(seqno int) (res bool) {
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Printf("%s:[WARN]memdbCheck200: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbCheck200: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
@@ -177,7 +178,7 @@ func (hls *NicoHls) memdbDelete(seqno int) {
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Printf("%s:[WARN]memdbDelete: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbDelete: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
@@ -194,7 +195,7 @@ func (hls *NicoHls) memdbCount() (res int) {
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Printf("%s:[WARN]memdbCount: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbCount: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}

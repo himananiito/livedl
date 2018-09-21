@@ -1034,14 +1034,14 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr,
 		start := time.Now().UnixNano()
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
-			fmt.Printf("%s:saveMedia: seqno=%d, total %d(ms)\n", debug_Now(), seqno, t)
+			fmt.Fprintf(os.Stderr, "%s:saveMedia: seqno=%d, total %d(ms)\n", debug_Now(), seqno, t)
 		}()
 	}
 
 	code, buff, millisec, err, neterr := getBytes(uri)
 	defer func(){buff = nil}()
 	if hls.nicoDebug {
-		fmt.Printf("%s:getBytes@saveMedia: seqno=%d, code=%v, err=%v, neterr=%v, %v(ms), len=%v\n",
+		fmt.Fprintf(os.Stderr, "%s:getBytes@saveMedia: seqno=%d, code=%v, err=%v, neterr=%v, %v(ms), len=%v\n",
 			debug_Now(), seqno, code, err, neterr, millisec, len(buff))
 	}
 	if err != nil || neterr != nil {
@@ -1088,7 +1088,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 	u := argUri.String()
 	m3u8, code, millisec, err, neterr := getString(u)
 	if hls.nicoDebug {
-		fmt.Printf("%s:getPlaylist: code=%v, err=%v, neterr=%v, %v(ms) >>>%s<<<\n",
+		fmt.Fprintf(os.Stderr, "%s:getPlaylist: code=%v, err=%v, neterr=%v, %v(ms) >>>%s<<<\n",
 			debug_Now(), code, err, neterr, millisec, m3u8)
 	}
 	if err != nil || neterr != nil {
@@ -1284,7 +1284,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 		if (! hls.isTimeshift) && (! hls.playlist.withoutFormat) {
 			// 404になるまで後ろに戻ってチャンクを取得する
 			if hls.nicoDebug {
-				fmt.Printf("%s:start chunks(back)\n", debug_Now())
+				fmt.Fprintf(os.Stderr, "%s:start chunks(back)\n", debug_Now())
 			}
 			for i := hls.playlist.seqNo - 1; i >= 0; i-- {
 				if hls.memdbGetStopBack(i) {
@@ -1322,7 +1322,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 
 		// m3u8の通りにチャンクを取得する
 		if hls.nicoDebug {
-			fmt.Printf("%s:start chunks(normal)\n", debug_Now())
+			fmt.Fprintf(os.Stderr, "%s:start chunks(normal)\n", debug_Now())
 		}
 		var found404 bool
 		for _, seq := range seqlist {
@@ -1469,7 +1469,7 @@ func (hls *NicoHls) startPlaylist(uri string) {
 			}
 
 			if hls.nicoDebug {
-				fmt.Printf("%s:time.After()=%v(sec)\n", debug_Now(), float64(dur)/float64(time.Second))
+				fmt.Fprintf(os.Stderr, "%s:time.After()=%v(sec)\n", debug_Now(), float64(dur)/float64(time.Second))
 			}
 
 			select {
@@ -1524,7 +1524,7 @@ func (hls *NicoHls) startMain() {
 	// エラー時はMAIN_*を返すこと
 	hls.startPGoroutine(func(sig chan struct{}) int {
 		if hls.nicoDebug {
-			fmt.Printf("%s:startMain: delay = %d(sec)\n", debug_Now(), hls.startDelay)
+			fmt.Fprintf(os.Stderr, "%s:startMain: delay = %d(sec)\n", debug_Now(), hls.startDelay)
 		}
 
 		select {
@@ -1534,7 +1534,7 @@ func (hls *NicoHls) startMain() {
 		}
 
 		if hls.nicoDebug {
-			fmt.Printf("%s:start dial main(%s)\n", debug_Now(), hls.webSocketUrl)
+			fmt.Fprintf(os.Stderr, "%s:start dial main(%s)\n", debug_Now(), hls.webSocketUrl)
 		}
 		conn, _, err := websocket.DefaultDialer.Dial(
 			hls.webSocketUrl,
@@ -1635,7 +1635,7 @@ func (hls *NicoHls) startMain() {
 				return NETWORK_ERROR
 			}
 			if hls.nicoDebug {
-				fmt.Printf("%s:ReadJSON => %v\n", debug_Now(), res)
+				fmt.Fprintf(os.Stderr, "%s:ReadJSON => %v\n", debug_Now(), res)
 			}
 
 			_type, ok := obj.FindString(res, "type")

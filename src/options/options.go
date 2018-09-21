@@ -67,7 +67,7 @@ func version() {
 	fmt.Println(versionStr())
 	os.Exit(0)
 }
-func Help() {
+func Help(verbose ...bool) {
 	cmd := filepath.Base(os.Args[0])
 	ext := filepath.Ext(cmd)
 	cmd = strings.TrimSuffix(cmd, ext)
@@ -80,14 +80,13 @@ COMMAND:
   -nico    ニコニコ生放送の録画
   -tcas    ツイキャスの録画
   -yt      YouTube Liveの録画
-  -z2m     録画済みのzipをmp4に変換する(-zip-to-mp4)
   -d2m     録画済みのdb(.sqlite3)をmp4に変換する(-db-to-mp4)
 
 オプション/option:
-  -conf-pass <password> [廃止] 設定ファイルのパスワード
-  -h                    ヘルプを表示
-  -v                    バージョンを表示
-  --                    後にオプションが無いことを指定
+  -h     ヘルプを表示
+  -vh    全てのオプションを表示
+  -v     バージョンを表示
+  --     後にオプションが無いことを指定
 
 ニコニコ生放送録画用オプション:
   -nico-login <id>,<password>    (+) ニコニコのIDとパスワードを指定する
@@ -96,10 +95,10 @@ COMMAND:
   -nico-login-only=off           (+) 非ログインでも録画可能とする(デフォルト)
   -nico-hls-only                 録画時にHLSのみを試す
   -nico-hls-only=on              (+) 上記を有効に設定
-  -nico-hls-only=off             (+) 上記を無効に設定
+  -nico-hls-only=off             (+) 上記を無効に設定(デフォルト)
   -nico-rtmp-only                録画時にRTMPのみを試す
   -nico-rtmp-only=on             (+) 上記を有効に設定
-  -nico-rtmp-only=off            (+) 上記を無効に設定
+  -nico-rtmp-only=off            (+) 上記を無効に設定(デフォルト)
   -nico-rtmp-max-conn <num>      RTMPの同時接続数を設定
   -nico-rtmp-index <num>[,<num>] RTMP録画を行うメディアファイルの番号を指定
   -nico-hls-port <portnum>       [実験的] ローカルなHLSサーバのポート番号
@@ -107,34 +106,29 @@ COMMAND:
   -nico-format "FORMAT"          (+) 保存時のファイル名を指定する
   -nico-fast-ts                  倍速タイムシフト録画を行う(新配信タイムシフト)
   -nico-fast-ts=on               (+) 上記を有効に設定
-  -nico-fast-ts=off              (+) 上記を無効に設定
+  -nico-fast-ts=off              (+) 上記を無効に設定(デフォルト)
   -nico-auto-convert=on          (+) 録画終了後自動的にMP4に変換するように設定
   -nico-auto-convert=off         (+) 上記を無効に設定
-  -nico-auto-delete-mode 0       (+) 自動変換後にデータベースファイルを削除しないように設定
+  -nico-auto-delete-mode 0       (+) 自動変換後にデータベースファイルを削除しないように設定(デフォルト)
   -nico-auto-delete-mode 1       (+) 自動変換でMP4が分割されなかった場合のみ削除するように設定
   -nico-auto-delete-mode 2       (+) 自動変換でMP4が分割されても削除するように設定
   -nico-force-reservation=on     (+) 視聴にタイムシフト予約が必要な場合に自動的に上書きする
   -nico-force-reservation=off    (+) 自動的にタイムシフト予約しない(デフォルト)
 
-ツイキャス録画用オプション
+ツイキャス録画用オプション:
   -tcas-retry=on                 (+) 録画終了後に再試行を行う
   -tcas-retry=off                (+) 録画終了後に再試行を行わない
   -tcas-retry-timeout            (+) 再試行を開始してから終了するまでの時間（分)
                                      -1で無限ループ。デフォルト: 5分
   -tcas-retry-interval           (+) 再試行を行う間隔（秒）デフォルト: 60秒
 
-変換オプション
+変換オプション:
   -extract-chunks=off            (+) -d2mで動画ファイルに書き出す(デフォルト)
-  -extract-chunks=on             (+) -d2mで各々のチャンクを書き出す
+  -extract-chunks=on             (+) -d2mで各々のチャンクを書き出す(大量のファイルが生成される)
   -conv-ext=mp4                  (+) -d2mで出力の拡張子を.mp4とする(デフォルト)
   -conv-ext=ts                   (+) -d2mで出力の拡張子を.tsとする
 
 (+)のついたオプションは、次回も同じ設定が使用されることを示す。
-
-COMMAND(debugging)
-  -nico-test-run (debugging) test for nicolive
-option(debugging)
-  -nico-test-timeout <num> timeout for each test
 
 FILE:
   ニコニコ生放送/nicolive:
@@ -144,6 +138,26 @@ FILE:
     https://twitcasting.tv/XXXXX
 `
 	fmt.Printf(format, cmd, buildno.GetBuildNo(), cmd)
+
+	for _, b := range verbose {
+		if b {
+			fmt.Print(`
+旧オプション:
+  -conf-pass <password> [廃止] 設定ファイルのパスワード
+  -z2m                  録画済みのzipをmp4に変換する(-zip-to-mp4)
+  -nico-status-https    -
+
+デバッグ用オプション:
+  -nico-test-run           ニコ生テストラン
+  -nico-test-timeout <num> ニコ生テストランでの各放送のタイムアウト
+  -nico-test-format        フォーマット、保存しない
+  -nico-ufast-ts           TS保存にウェイトを入れない
+  -nico-debug              デバッグ用ログ出力する
+`)
+			break
+		}
+	}
+
 	os.Exit(0)
 }
 
@@ -356,6 +370,10 @@ func ParseArgs() (opt Option) {
 	parseList := []Parser{
 		Parser{regexp.MustCompile(`\A(?i)(?:--?|/)(?:\?|h|help)\z`), func() error {
 			Help()
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)(?:--?|/)v(?:\?|h|help)\z`), func() error {
+			Help(true)
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?(?:v|version)\z`), func() error {
@@ -729,7 +747,7 @@ func ParseArgs() (opt Option) {
 			dbConfSet(db, "ExtractChunks", opt.ExtractChunks)
 			return nil
 		}},
-		Parser{regexp.MustCompile(`\A(?i)--?nico-?force-?(?:resv|reservation)(?:=(on|off))\z`), func() error {
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?force-?(?:re?sv|reservation)(?:=(on|off))\z`), func() error {
 			if strings.EqualFold(match[1], "on") {
 				opt.NicoForceResv = true
 			} else if strings.EqualFold(match[1], "off") {

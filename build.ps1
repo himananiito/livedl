@@ -1,6 +1,7 @@
 rm livedl.exe
 go run updatebuildno.go
 go build src/livedl.go
+go build livedl-logger.go
 
 # hide local path
 perl replacelocal.pl
@@ -20,6 +21,7 @@ if(Test-Path -PathType Container $dir) {
 }
 mkdir $dir
 cp livedl.exe $dir
+cp livedl-logger.exe $dir
 cp Readme.md $dir
 
 cp livedl-gui.exe $dir
