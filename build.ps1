@@ -6,6 +6,9 @@ go build livedl-logger.go
 # hide local path
 perl replacelocal.pl
 
+# Generate Readme.txt
+perl readme-gen.pl
+
 # livedl test run(nico)
 $process = Start-Process -FilePath livedl.exe -ArgumentList '-nicotestrun -nicotesttimeout 7 -nicotestfmt "testrec/?UNAME?/?PID?-?UNAME?-?TITLE?"' -PassThru
 $process.WaitForExit(1000 * 61)
@@ -22,7 +25,7 @@ if(Test-Path -PathType Container $dir) {
 mkdir $dir
 cp livedl.exe $dir
 cp livedl-logger.exe $dir
-cp Readme.md $dir
+cp Readme.txt $dir
 
 cp livedl-gui.exe $dir
 cp livedl-gui.exe.config $dir

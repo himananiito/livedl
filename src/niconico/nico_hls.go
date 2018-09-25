@@ -91,6 +91,9 @@ type NicoHls struct {
 	fastTimeshift bool
 	ultrafastTimeshift bool
 
+	fastTimeshiftOrig bool
+	ultrafastTimeshiftOrig bool
+
 	finish bool
 	commentDone bool
 
@@ -266,6 +269,8 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		limitBwOrig: opt.NicoLimitBw,
 		nicoDebug: opt.NicoDebug,
 	}
+	hls.fastTimeshiftOrig = hls.fastTimeshift
+	hls.ultrafastTimeshiftOrig = hls.ultrafastTimeshift
 
 	for i := 0; i < 2 ; i++ {
 		err := hls.dbOpen()
@@ -491,7 +496,6 @@ func (hls *NicoHls) markRestartMain(delay int) {
 }
 
 func (hls *NicoHls) checkReturnCode(code int) {
-
 	// NEVER restart goroutines here except interrupt handler
 	switch code {
 	case NETWORK_ERROR, MAIN_TEMPORARILY_ERROR:
@@ -1028,7 +1032,7 @@ func getBytes(uri string) (code int, buff []byte, t int64, err, neterr error) {
 	return
 }
 
-func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr, err error) {
+func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404, is500 bool, neterr, err error) {
 
 	if hls.nicoDebug {
 		start := time.Now().UnixNano()
@@ -1039,7 +1043,6 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr,
 	}
 
 	code, buff, millisec, err, neterr := getBytes(uri)
-	defer func(){buff = nil}()
 	if hls.nicoDebug {
 		fmt.Fprintf(os.Stderr, "%s:getBytes@saveMedia: seqno=%d, code=%v, err=%v, neterr=%v, %v(ms), len=%v\n",
 			debug_Now(), seqno, code, err, neterr, millisec, len(buff))
@@ -1062,6 +1065,11 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404 bool, neterr,
 		hls.memdbSet404(seqno)
 		is404 = true
 		return
+	case 500:
+		is500 = true
+		return
+	case 200:
+		// OK
 	}
 
 	data := map[string]interface{}{
@@ -1211,7 +1219,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 				}
 
 				if i == 0 {
-					if (! hls.isTimeshift) || (! hls.fastTimeshift) {
+					if (! hls.isTimeshift) && (! hls.fastTimeshift) {
 						if d > 3 {
 							fmt.Printf("debug: found EXTINF=%v\n", d)
 							d = 2.0
@@ -1299,7 +1307,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 
 				u := fmt.Sprintf(hls.playlist.format, i)
 				var is404 bool
-				is403, is404, neterr, err = hls.saveMedia(i, u)
+				is403, is404, _, neterr, err = hls.saveMedia(i, u)
 				if neterr != nil || err != nil {
 					return
 				}
@@ -1324,6 +1332,13 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 		if hls.nicoDebug {
 			fmt.Fprintf(os.Stderr, "%s:start chunks(normal)\n", debug_Now())
 		}
+
+		// 一時的に倍速モードを切っているかもしれないので戻す
+		if hls.isTimeshift && (0 < hls.playlist.seqNo && hls.playlist.seqNo < 10) {
+				hls.fastTimeshift = hls.fastTimeshiftOrig
+				hls.ultrafastTimeshift = hls.ultrafastTimeshiftOrig
+		}
+
 		var found404 bool
 		for _, seq := range seqlist {
 			if hls.memdbCheck200(seq.seqno) {
@@ -1336,7 +1351,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 			}
 
 			var is404 bool
-			is403, is404, neterr, err = hls.saveMedia(seq.seqno, seq.uri)
+			is403, is404, is500, neterr, err = hls.saveMedia(seq.seqno, seq.uri)
 			if neterr != nil || err != nil {
 				return
 			}
@@ -1345,6 +1360,16 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 				found404 = true
 			}
 			if is403 {
+				return
+			}
+
+			// TS時、先頭(SeqNo=0)で500となる時があるが
+			// Seekしなければ次回に取得可能なので一時的に倍速モードを切る
+			if is500 && hls.fastTimeshift && (seq.seqno == 0) {
+				fmt.Println("[WARN] disabled fastTimeshift")
+
+				hls.fastTimeshift = false
+				hls.ultrafastTimeshift = false
 				return
 			}
 
