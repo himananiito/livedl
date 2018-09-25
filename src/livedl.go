@@ -91,7 +91,7 @@ func main() {
 			}
 
 			var interval int
-			if interval <= 0 {
+			if opt.TcasRetryInterval <= 0 {
 				interval = options.DefaultTcasRetryInterval
 			} else {
 				interval = opt.TcasRetryInterval
