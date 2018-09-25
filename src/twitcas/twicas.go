@@ -198,7 +198,7 @@ func TwitcasRecord(user, proxy string) (done, dbLocked bool) {
 	var fileOpened bool
 
 	filenameBase := fmt.Sprintf("%s_%d.ts", user, movieId)
-	filenameBase = files.ReplaceForbidden(filenameBase)
+	filenameBase = files.ReplaceForbidden(filenameBase) // fixed #8
 
 	closeFF := func() {
 		if stdin != nil {
