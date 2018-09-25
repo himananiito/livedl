@@ -90,12 +90,15 @@ func getStream(user, proxy string) (conn *websocket.Conn, movieId uint64, err er
 	}
 
 	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return
+	}
 
 	client := new(http.Client)
 	client.Timeout, _ = time.ParseDuration("10s")
 
-	resp, e := client.Do(req)
-	if e != nil {
+	resp, err := client.Do(req)
+	if err != nil {
 		return
 	}
 
@@ -132,6 +135,9 @@ func getStream(user, proxy string) (conn *websocket.Conn, movieId uint64, err er
 
 		if data.Fmp4.Proto != "" && data.Fmp4.Host != "" && data.Movie.Id != 0 {
 			conn, err = connectStream(data.Fmp4.Proto, data.Fmp4.Host, mode, data.Movie.Id, proxy)
+			if err != nil {
+				return
+			}
 			movieId = data.Movie.Id
 		} else {
 			err = errors.New(user + " --> " + "No Stream Defined")
@@ -163,6 +169,10 @@ func TwitcasRecord(user, proxy string) (done, dbLocked bool) {
 		fmt.Printf("@err %v\n", err)
 		return
 	}
+	if conn == nil {
+		fmt.Println("[FIXME] conn is nil")
+		return
+	}
 	defer conn.Close()
 
 	dbName := fmt.Sprintf("tmp/tcas-%v-lock.db", movieId)
@@ -187,16 +197,24 @@ func TwitcasRecord(user, proxy string) (done, dbLocked bool) {
 
 	var fileOpened bool
 
-	openFF := func() (err error) {
+	filenameBase := fmt.Sprintf("%s_%d.ts", user, movieId)
+	filenameBase = files.ReplaceForbidden(filenameBase)
+
+	closeFF := func() {
+		if stdin != nil {
+			stdin.Close()
+		}
 		if cmd != nil {
-			if stdin != nil {
-				stdin.Close()
-			}
 			cmd.Wait()
 		}
+		stdin = nil
+		cmd = nil
+	}
 
-		filename := fmt.Sprintf("%s_%d.ts", user, movieId)
-		filename, err = files.GetFileNameNext(filename)
+	openFF := func() (err error) {
+		closeFF()
+
+		filename, err := files.GetFileNameNext(filenameBase)
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -212,18 +230,6 @@ func TwitcasRecord(user, proxy string) (done, dbLocked bool) {
 		fileOpened = true
 		return
 	}
-
-	closeFF := func() {
-		if stdin != nil {
-			stdin.Close()
-		}
-		if cmd != nil {
-			cmd.Wait()
-		}
-		stdin = nil
-		cmd = nil
-	}
-
 
 	for {
 		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
