@@ -16,7 +16,7 @@ open my $g, "changelog.txt" or die;
 my $t = <$g>;
 close $g;
 
-$t =~ s{\$latest}{$ver};
+$t =~ s{\$latest}{$ver} or die;
 
 open my $h, ">", "changelog.txt" or die;
 print $h $t;

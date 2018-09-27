@@ -1176,6 +1176,20 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 			}
 		}
 
+		// 総時間
+		var streamDuration float64
+		if hls.isTimeshift {
+			if ma := regexp.MustCompile(`#(?:DMC-)?STREAM-DURATION:([\+\-]?\d+(?:\.\d+)?(?:[eE][\+\-]?\d+)?)`).
+			FindStringSubmatch(m3u8); len(ma) > 0 {
+				n, e := strconv.ParseFloat(ma[1], 64)
+				if e != nil {
+					err = e
+					return
+				}
+				streamDuration = n
+			}
+		}
+
 		var seqStart int
 
 		seqStart, err = strconv.Atoi(ma[1])
@@ -1298,12 +1312,6 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 				if hls.memdbGetStopBack(i) {
 					break
 				}
-				//if hls.dbCheckBack(i) {
-				//	hls.dbMarkNoBack(hls.playlist.seqNo - 1)
-				//	break
-				//} else if hls.dbCheckSequence(i, true) {
-				//	continue
-				//}
 
 				u := fmt.Sprintf(hls.playlist.format, i)
 				var is404 bool
@@ -1392,6 +1400,15 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 			isEnd = true
 			return
 		}
+
+		if hls.isTimeshift {
+			d := streamDuration - (currentPos + duration)
+			if d < 1.0 {
+				isEnd = true
+				return
+			}
+		}
+
 
 	} else {
 		// Master m3u8
