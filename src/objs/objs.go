@@ -1,5 +1,5 @@
 
-package obj
+package objs
 
 import (
 	"fmt"
@@ -13,34 +13,38 @@ func PrintAsJson(data interface{}) {
 	}
 	fmt.Println(string(json))
 }
-func FindVal(intf interface{}, keylist... string) (res interface{}, ok bool) {
+func Find(intf interface{}, keylist... string) (res interface{}, ok bool) {
 	res = intf
 	if len(keylist) == 0 {
 		ok = true
 		return
 	}
-	for _, k := range keylist {
+	for i, k := range keylist {
 		var test bool
-		var obj map[string]interface{}
-		obj, test = res.(map[string]interface{})
-		if (! test) {
-			// data is not object
-			ok = false
-			return
-		}
-
-		res, test = obj[k]
-		if (! test) {
-			// key not exists
-			ok = false
-			return
+		//var obj map[string]interface{}
+		switch res.(type) {
+		case map[string]interface{}:
+			res, test = res.(map[string]interface{})[k]
+			if (! test) {
+				ok = false
+				return
+			}
+		case []interface{}:
+			for _, o := range res.([]interface{}) {
+				_res, _ok := Find(o, keylist[i:]...)
+				if _ok {
+					res = _res
+					ok = _ok
+					return
+				}
+			}
 		}
 	}
 	ok = true
 	return
 }
 func FindFloat64(intf interface{}, keylist... string) (res float64, ok bool) {
-	val, ok := FindVal(intf, keylist...)
+	val, ok := Find(intf, keylist...)
 	if !ok {
 		return
 	}
@@ -48,7 +52,7 @@ func FindFloat64(intf interface{}, keylist... string) (res float64, ok bool) {
 	return
 }
 func FindString(intf interface{}, keylist... string) (res string, ok bool) {
-	val, ok := FindVal(intf, keylist...)
+	val, ok := Find(intf, keylist...)
 	if !ok {
 		return
 	}
@@ -56,7 +60,7 @@ func FindString(intf interface{}, keylist... string) (res string, ok bool) {
 	return
 }
 func FindBool(intf interface{}, keylist... string) (res bool, ok bool) {
-	val, ok := FindVal(intf, keylist...)
+	val, ok := Find(intf, keylist...)
 	if !ok {
 		return
 	}
@@ -64,7 +68,7 @@ func FindBool(intf interface{}, keylist... string) (res bool, ok bool) {
 	return
 }
 func FindArray(intf interface{}, keylist... string) (res []interface{}, ok bool) {
-	val, ok := FindVal(intf, keylist...)
+	val, ok := Find(intf, keylist...)
 	if !ok {
 		return
 	}

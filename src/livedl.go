@@ -102,7 +102,10 @@ func main() {
 		}
 
 	case "YOUTUBE":
-		youtube.Record(opt.YoutubeId)
+		err := youtube.Record(opt.YoutubeId)
+		if err != nil {
+			fmt.Println(err)
+		}
 
 	case "NICOLIVE":
 		hlsPlaylistEnd, dbname, err := niconico.Record(opt);

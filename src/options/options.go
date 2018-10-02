@@ -122,6 +122,9 @@ COMMAND:
                                      -1で無限ループ。デフォルト: 5分
   -tcas-retry-interval           (+) 再試行を行う間隔（秒）デフォルト: 60秒
 
+Youtube live録画用オプション:
+  -yt-api-key <key>              (+) YouTube Data API v3 keyを設定する
+
 変換オプション:
   -extract-chunks=off            (+) -d2mで動画ファイルに書き出す(デフォルト)
   -extract-chunks=on             (+) -d2mで各々のチャンクを書き出す(大量のファイルが生成される)
@@ -186,6 +189,7 @@ func SetNicoLogin(hash, user, pass string) (err error) {
 	`, hash, user, pass, user, pass, hash)
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
 	fmt.Printf("niconico account saved.\n")
 	return
@@ -206,6 +210,7 @@ func SetNicoSession(hash, session string) (err error) {
 	`, hash, session, session, hash)
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
 	return
 }
@@ -220,6 +225,43 @@ func LoadNicoAccount(alias string) (user, pass, session string, err error){
 	defer db.Close()
 
 	db.QueryRow(`SELECT user, pass, IFNULL(session, "") FROM niconico WHERE alias = ?`, alias).Scan(&user, &pass, &session)
+	return
+}
+func SetYoutubeApiKey(key string) (err error) {
+	db, err := dbAccountOpen()
+	if err != nil {
+		if db != nil {
+			db.Close()
+		}
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`
+		INSERT OR IGNORE INTO youtubeapikey (id, key) VALUES(1, ?);
+		UPDATE youtubeapikey SET key = ? WHERE id = 1
+	`, key, key)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("Youtube API KEY saved.\n")
+	return
+}
+func LoadYoutubeApiKey() (key string, err error){
+	db, err := dbAccountOpen()
+	if err != nil {
+		if db != nil {
+			db.Close()
+		}
+		return
+	}
+	defer db.Close()
+
+	db.QueryRow(`SELECT IFNULL(key, "") FROM youtubeapikey WHERE id = 1`).Scan(&key)
+	if key == "" {
+		err = fmt.Errorf("apikey not found")
+	}
 	return
 }
 func dbAccountOpen() (db *sql.DB, err error) {
@@ -248,6 +290,7 @@ func dbAccountOpen() (db *sql.DB, err error) {
 		return
 	}
 
+	// niconico
 	_, err = db.Exec(`
 	CREATE TABLE IF NOT EXISTS niconico (
 		alias TEXT PRIMARY KEY NOT NULL UNIQUE,
@@ -267,6 +310,25 @@ func dbAccountOpen() (db *sql.DB, err error) {
 	if err != nil {
 		return
 	}
+
+	// youtube API key
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS youtubeapikey (
+		id PRIMARY KEY NOT NULL UNIQUE,
+		key TEXT
+	)
+	`)
+	if err != nil {
+		return
+	}
+
+	_, err = db.Exec(`
+	CREATE UNIQUE INDEX IF NOT EXISTS youtubeapikey0 ON youtubeapikey(id);
+	`)
+	if err != nil {
+		return
+	}
+
 	return
 }
 
@@ -755,6 +817,17 @@ func ParseArgs() (opt Option) {
 			}
 			dbConfSet(db, "NicoForceResv", opt.NicoForceResv)
 			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?yt-?api-?key\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return
+			}
+			if s == "" {
+				return fmt.Errorf("--yt-api-key: null string not allowed\n", s)
+			}
+			err = SetYoutubeApiKey(s)
+			return
 		}},
 	}
 

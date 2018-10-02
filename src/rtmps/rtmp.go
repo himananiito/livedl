@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"../amf"
 	"../flvs"
-	"../obj"
+	"../objs"
 	"../files"
 )
 
@@ -325,7 +325,7 @@ func (rtmp *Rtmp) SetFixAggrTimestamp(sw bool) {
 	rtmp.fixAggrTimestamp = sw
 }
 func (rtmp *Rtmp) CheckStatus(label string, ts int, data interface{}, waitPause bool) (done, incomplete, pauseFound bool, err error) {
-	code, ok := obj.FindString(data, "code")
+	code, ok := objs.FindString(data, "code")
 	if (! ok) {
 		err = fmt.Errorf("%s: code Not found", label)
 		return
@@ -470,7 +470,7 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 		}
 
 	case TID_AMF0DATA, TID_AMF3DATA:
-		obj.PrintAsJson(res)
+		objs.PrintAsJson(res)
 		list, ok := res.([]interface{})
 		if (! ok) {
 			err = fmt.Errorf("result AMF Data is not array")
@@ -489,7 +489,7 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 				done, incomplete, pauseFound, err = rtmp.CheckStatus("onPlayStatus", ts, list[1], waitPause)
 
 			case "onMetaData":
-				dur, ok := obj.FindFloat64(list[1], "duration")
+				dur, ok := objs.FindFloat64(list[1], "duration")
 				if ok {
 					rtmp.duration = int(dur * 1000)
 				} else {
@@ -501,7 +501,7 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 					rtmp.writeMetaData(meta, ts)
 				}
 
-				_, ok = obj.FindVal(list[1], "videoframerate")
+				_, ok = objs.Find(list[1], "videoframerate")
 				if ok {
 					rtmp.VideoExists = true
 				}
@@ -509,7 +509,7 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 		}
 
 	case TID_AMF0COMMAND, TID_AMF3COMMAND:
-		obj.PrintAsJson(res)
+		objs.PrintAsJson(res)
 
 		list, ok := res.([]interface{})
 		if (! ok) {
@@ -673,7 +673,7 @@ func (rtmp *Rtmp) Command(name string, args []interface{}) (trData interface{}, 
 	}
 	cmd := []interface{}{name, trId}
 	cmd = append(cmd, args...)
-obj.PrintAsJson(cmd)
+objs.PrintAsJson(cmd)
 	body, err := amf.EncodeAmf0(cmd, false)
 	wbuff, err := amf0Command(rtmp.chunkSizeSend, csId, streamId, body)
 

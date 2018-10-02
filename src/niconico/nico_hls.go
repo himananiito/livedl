@@ -15,7 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"../options"
 	"../files"
-	"../obj"
+	"../objs"
 	"os/signal"
 	"sync"
 	"strings"
@@ -32,6 +32,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"context"
 	"math"
+	"../gorman"
 )
 
 type OBJ = map[string]interface{}
@@ -55,21 +56,8 @@ type NicoHls struct {
 	webSocketUrl string
 	myUserId string
 
-	wgPlaylist *sync.WaitGroup
-	chsPlaylist []chan struct{}
-
-	wgComment *sync.WaitGroup
-	chsComment []chan struct{}
-
-	wgMain *sync.WaitGroup
-	chsMaster []chan struct{}
-
-	wgDB *sync.WaitGroup
-	//chsDB []chan struct{}
-
 	commentStarted bool
 
-	mtxGoCh sync.Mutex
 	chInterrupt chan os.Signal
 	nInterrupt int
 	mtxInterrupt sync.Mutex
@@ -111,6 +99,11 @@ type NicoHls struct {
 	bw500 int
 
 	mtxWg sync.Mutex
+
+	gmPlst *gorman.GoroutineManager
+	gmCmnt *gorman.GoroutineManager
+	gmDB *gorman.GoroutineManager
+	gmMain *gorman.GoroutineManager
 }
 func debug_Now() string {
 	return time.Now().Format("2006/01/02-15:04:05")
@@ -252,11 +245,6 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		webSocketUrl: webSocketUrl,
 		myUserId: myUserId,
 
-		wgPlaylist: &sync.WaitGroup{},
-		wgComment: &sync.WaitGroup{},
-		wgMain: &sync.WaitGroup{},
-		wgDB: &sync.WaitGroup{},
-
 		quality: "abr",
 		dbName: dbName,
 
@@ -268,7 +256,13 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		limitBw: opt.NicoLimitBw,
 		limitBwOrig: opt.NicoLimitBw,
 		nicoDebug: opt.NicoDebug,
+
+		gmPlst: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
+		gmCmnt: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
+		gmDB: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
+		gmMain: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
 	}
+
 	hls.fastTimeshiftOrig = hls.fastTimeshift
 	hls.ultrafastTimeshiftOrig = hls.ultrafastTimeshift
 
@@ -388,12 +382,7 @@ const (
 	ERROR_SHUTDOWN
 	NETWORK_ERROR
 )
-const (
-	START_PLAYLIST = iota
-	START_COMMENT
-	START_MASTER
-	START_DB
-)
+
 func (hls *NicoHls) stopPCGoroutines() {
 	hls.stopPGoroutines()
 	hls.stopCGoroutines()
@@ -404,41 +393,18 @@ func (hls *NicoHls) stopAllGoroutines() {
 	hls.stopMGoroutines()
 }
 func (hls *NicoHls) stopPGoroutines() {
-	hls.mtxGoCh.Lock()
-	defer hls.mtxGoCh.Unlock()
-
-	for _, c := range hls.chsPlaylist {
-		//c <-struct{}{}
-		close(c)
-	}
-	hls.chsPlaylist = []chan struct{}{}
+	hls.gmPlst.Cancel()
 }
 func (hls *NicoHls) stopCGoroutines() {
-	hls.mtxGoCh.Lock()
-	defer hls.mtxGoCh.Unlock()
-
-	for _, c := range hls.chsComment {
-		//c <-struct{}{}
-		close(c)
-	}
-	hls.chsComment = []chan struct{}{}
+	hls.gmCmnt.Cancel()
 }
 func (hls *NicoHls) stopMGoroutines() {
-	hls.mtxGoCh.Lock()
-	defer hls.mtxGoCh.Unlock()
-
-	for _, c := range hls.chsMaster {
-		//c <-struct{}{}
-		close(c)
-	}
-	hls.chsMaster = []chan struct{}{}
+	hls.gmMain.Cancel()
 }
 func (hls *NicoHls) working() bool {
-	hls.mtxGoCh.Lock()
-	defer hls.mtxGoCh.Unlock()
-
-	return len(hls.chsPlaylist) > 0 || len(hls.chsComment) > 0
+	return hls.gmPlst.Count() > 0 || hls.gmCmnt.Count() > 0 || hls.gmDB.Count() > 0
 }
+
 func (hls *NicoHls) stopInterrupt() {
 	if hls.chInterrupt != nil {
 		signal.Stop(hls.chInterrupt)
@@ -450,7 +416,7 @@ func (hls *NicoHls) startInterrupt() {
 		signal.Notify(hls.chInterrupt, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	}
 
-	hls.startMGoroutine(func(sig chan struct{}) int {
+	hls.startMGoroutine(func(sig <-chan struct{}) int {
 		select {
 		case <-hls.chInterrupt:
 			hls.IncrInterrupt()
@@ -459,7 +425,6 @@ func (hls *NicoHls) startInterrupt() {
 				hls.dbCommit()
 			}()
 			if hls.nInterrupt >= 2 {
-				//hls.dbCommit()
 				os.Exit(0)
 			}
 			return INTERRUPT
@@ -494,7 +459,6 @@ func (hls *NicoHls) markRestartMain(delay int) {
 		hls.restartMain = true
 	}
 }
-
 func (hls *NicoHls) checkReturnCode(code int) {
 	// NEVER restart goroutines here except interrupt handler
 	switch code {
@@ -579,89 +543,28 @@ func (hls *NicoHls) checkReturnCode(code int) {
 	case OK:
 	}
 }
-func (hls *NicoHls) wgAddOrDone(startType int, done bool) {
-	hls.mtxWg.Lock()
-	defer hls.mtxWg.Unlock()
 
-	if done {
-		switch startType {
-		case START_PLAYLIST:
-			hls.wgPlaylist.Done()
-		case START_COMMENT:
-			hls.wgComment.Done()
-		case START_MASTER:
-			hls.wgMain.Done()
-		case START_DB:
-			hls.wgDB.Done()
-		}
-	} else {
-		switch startType {
-		case START_PLAYLIST:
-			hls.wgPlaylist.Add(1)
-		case START_COMMENT:
-			hls.wgComment.Add(1)
-		case START_MASTER:
-			hls.wgMain.Add(1)
-		case START_DB:
-			hls.wgDB.Add(1)
-		}
-	}
-}
-func (hls *NicoHls) wgStart(startType int) {
-	hls.wgAddOrDone(startType, false)
-}
-func (hls *NicoHls) wgDone(startType int) {
-	hls.wgAddOrDone(startType, true)
-}
-func (hls *NicoHls) startGoroutine(start_t int, f func(chan struct{}) int) {
-	hls.wgStart(start_t)
-	stopChan := make(chan struct{}, 10)
-
-	func() {
-		hls.mtxGoCh.Lock()
-		defer hls.mtxGoCh.Unlock()
-
-		switch start_t {
-		case START_PLAYLIST:
-			hls.chsPlaylist = append(hls.chsPlaylist, stopChan)
-		case START_COMMENT:
-			hls.chsComment = append(hls.chsComment, stopChan)
-		case START_MASTER:
-			hls.chsMaster = append(hls.chsMaster, stopChan)
-		case START_DB:
-			//hls.chsDB = append(hls.chsDB, stopChan)
-		}
-	}()
-
-	//if runtime.NumGoroutine() > 100 {
-	//	log.Fatalln("too many goroutines")
-	//}
-
-	go func(start_t int){
-		code := f(stopChan)
-		hls.wgDone(start_t)
-		hls.checkReturnCode(code)
-	}(start_t)
-}
 // Of playlist
-func (hls *NicoHls) startPGoroutine(f func(chan struct{}) int) {
+func (hls *NicoHls) startPGoroutine(f func(<-chan struct{}) int) {
 	if (! hls.interrupted()) {
-		hls.startGoroutine(START_PLAYLIST, f)
+		hls.gmPlst.Go(f)
 	}
 }
 // Of comment
-func (hls *NicoHls) startCGoroutine(f func(chan struct{}) int) {
+func (hls *NicoHls) startCGoroutine(f func(<-chan struct{}) int) {
 	if (! hls.interrupted()) {
-		hls.startGoroutine(START_COMMENT, f)
+		hls.gmCmnt.Go(f)
 	}
 }
-func (hls *NicoHls) startMGoroutine(f func(chan struct{}) int) {
-	hls.startGoroutine(START_MASTER, f)
-}
-func (hls *NicoHls) startDBGoroutine(f func(chan struct{}) int) {
+// Of DB
+func (hls *NicoHls) startDBGoroutine(f func(<-chan struct{}) int) {
 	if (! hls.interrupted()) {
-		hls.startGoroutine(START_DB, f)
+		hls.gmDB.Go(f)
 	}
+}
+// Of main
+func (hls *NicoHls) startMGoroutine(f func(<-chan struct{}) int) {
+	hls.gmMain.Go(f)
 }
 
 func (hls *NicoHls) waitRestartMain() bool {
@@ -679,7 +582,7 @@ func (hls *NicoHls) waitRestartMain() bool {
 	defer hls.mtxRestart.Unlock()
 	if hls.restartMain {
 		hls.restartMain = false
-		hls.wgPlaylist = &sync.WaitGroup{}
+		//hls.wgPlaylist = &sync.WaitGroup{}
 		hls.startMain()
 		return true
 	}
@@ -687,16 +590,16 @@ func (hls *NicoHls) waitRestartMain() bool {
 }
 
 func (hls *NicoHls) waitPGoroutines() {
-	hls.wgPlaylist.Wait()
+	hls.gmPlst.Wait()
 }
 func (hls *NicoHls) waitCGoroutines() {
-	hls.wgComment.Wait()
-}
-func (hls *NicoHls) waitMGoroutines() {
-	hls.wgMain.Wait()
+	hls.gmCmnt.Wait()
 }
 func (hls *NicoHls) waitDBGoroutines() {
-	hls.wgDB.Wait()
+	hls.gmDB.Wait()
+}
+func (hls *NicoHls) waitMGoroutines() {
+	hls.gmMain.Wait()
 }
 func (hls *NicoHls) waitAllGoroutines() {
 	hls.waitPGoroutines()
@@ -737,7 +640,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 	if (! hls.commentStarted) && (! hls.commentDone) {
 		hls.commentStarted = true
 
-		hls.startCGoroutine(func(sig chan struct{}) int {
+		hls.startCGoroutine(func(sig <-chan struct{}) int {
 			defer func(){
 				hls.commentStarted = false
 			}()
@@ -766,7 +669,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 				return conn.WriteJSON(d)
 			}
 
-			hls.startCGoroutine(func(sig chan struct{}) int {
+			hls.startCGoroutine(func(sig <-chan struct{}) int {
 				<-sig
 				if conn != nil {
 					conn.Close()
@@ -774,7 +677,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 				return OK
 			})
 
-			hls.startCGoroutine(func(sig chan struct{}) int {
+			hls.startCGoroutine(func(sig <-chan struct{}) int {
 				for (! hls.interrupted()) {
 					select {
 						case <-time.After(60 * time.Second):
@@ -810,7 +713,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 
 			if hls.isTimeshift {
 
-				hls.startCGoroutine(func(sig chan struct{}) int {
+				hls.startCGoroutine(func(sig <-chan struct{}) int {
 					defer func() {
 						fmt.Println("Comment done.")
 					}()
@@ -915,18 +818,18 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 
 					//fmt.Printf("debug %#v\n", res)
 
-					if data, ok := obj.FindVal(res, "chat"); ok {
+					if data, ok := objs.Find(res, "chat"); ok {
 						if err := hls.commentHandler("chat", data); err != nil {
 							return COMMENT_SAVE_ERROR
 						}
 						incChatCount()
 
-					} else if data, ok := obj.FindVal(res, "thread"); ok {
+					} else if data, ok := objs.Find(res, "thread"); ok {
 						if err := hls.commentHandler("thread", data); err != nil {
 							return COMMENT_SAVE_ERROR
 						}
 
-					} else if _, ok := obj.FindVal(res, "ping"); ok {
+					} else if _, ok := objs.Find(res, "ping"); ok {
 						// nop
 					} else {
 						fmt.Printf("[FIXME] Unknown Message: %#v\n", res)
@@ -1230,10 +1133,8 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 
 				if hls.isTimeshift {
 					duration += d
-				}
-
-				if i == 0 {
-					if (! hls.isTimeshift) && (! hls.fastTimeshift) {
+				} else {
+					if i == 0 {
 						if d > 3 {
 							fmt.Printf("debug: found EXTINF=%v\n", d)
 							d = 2.0
@@ -1475,7 +1376,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 }
 
 func (hls *NicoHls) startPlaylist(uri string) {
-	hls.startPGoroutine(func(sig chan struct{}) int {
+	hls.startPGoroutine(func(sig <-chan struct{}) int {
 		hls.playlist = playlist{}
 		//hls.playlist.uri = uri
 		u, e := url.Parse(uri)
@@ -1505,9 +1406,12 @@ func (hls *NicoHls) startPlaylist(uri string) {
 			} else {
 				now := time.Now()
 				dur = hls.playlist.nextTime.Sub(now)
-				if dur < time.Second {
-					dur = time.Second
-				}
+			}
+
+
+			// 181002
+			if dur < time.Second {
+				dur = time.Second
 			}
 
 			if hls.nicoDebug {
@@ -1564,7 +1468,7 @@ func (hls *NicoHls) startPlaylist(uri string) {
 func (hls *NicoHls) startMain() {
 
 	// エラー時はMAIN_*を返すこと
-	hls.startPGoroutine(func(sig chan struct{}) int {
+	hls.startPGoroutine(func(sig <-chan struct{}) int {
 		if hls.nicoDebug {
 			fmt.Fprintf(os.Stderr, "%s:startMain: delay = %d(sec)\n", debug_Now(), hls.startDelay)
 		}
@@ -1597,7 +1501,7 @@ func (hls *NicoHls) startMain() {
 		// debug
 		if false {
 			log.Printf("start ws error tsst")
-			hls.startPGoroutine(func(sig chan struct{}) int {
+			hls.startPGoroutine(func(sig <-chan struct{}) int {
 				select {
 				case <-time.After(10 * time.Second):
 					conn.Close()
@@ -1608,7 +1512,7 @@ func (hls *NicoHls) startMain() {
 			})
 		}
 
-		hls.startPGoroutine(func(sig chan struct{}) int {
+		hls.startPGoroutine(func(sig <-chan struct{}) int {
 			<-sig
 			if conn != nil {
 				conn.Close()
@@ -1680,17 +1584,17 @@ func (hls *NicoHls) startMain() {
 				fmt.Fprintf(os.Stderr, "%s:ReadJSON => %v\n", debug_Now(), res)
 			}
 
-			_type, ok := obj.FindString(res, "type")
+			_type, ok := objs.FindString(res, "type")
 			if (! ok) {
 				fmt.Printf("type not found\n")
 				continue
 			}
 			switch _type {
 			case "watch":
-				if cmd, ok := obj.FindString(res, "body", "command"); ok {
+				if cmd, ok := objs.FindString(res, "body", "command"); ok {
 					switch cmd {
 					case "watchinginterval":
-						if arr, ok := obj.FindArray(res, "body", "params"); ok {
+						if arr, ok := objs.FindArray(res, "body", "params"); ok {
 							for _, intf := range arr {
 								if str, ok := intf.(string); ok {
 									num, e := strconv.Atoi(str)
@@ -1705,7 +1609,7 @@ func (hls *NicoHls) startMain() {
 
 						if (! watchingStarted) && watchinginterval > 0 {
 							watchingStarted = true
-							hls.startPGoroutine(func(sig chan struct{}) int {
+							hls.startPGoroutine(func(sig <-chan struct{}) int {
 								for {
 									select {
 									case <-time.After(time.Duration(watchinginterval) * time.Second):
@@ -1734,7 +1638,7 @@ func (hls *NicoHls) startMain() {
 						}
 
 					case "currentstream":
-						if uri, ok := obj.FindString(res, "body", "currentStream", "uri"); ok {
+						if uri, ok := objs.FindString(res, "body", "currentStream", "uri"); ok {
 							if (! playlistStarted) && uri != "" {
 								playlistStarted = true
 								hls.startPlaylist(uri)
@@ -1743,7 +1647,7 @@ func (hls *NicoHls) startMain() {
 
 					case "disconnect":
 						// print params
-						if arr, ok := obj.FindArray(res, "body", "params"); ok {
+						if arr, ok := objs.FindArray(res, "body", "params"); ok {
 							fmt.Printf("%v\n", arr)
 							if len(arr) >= 2 {
 								if s, ok := arr[1].(string); ok {
@@ -1762,11 +1666,11 @@ func (hls *NicoHls) startMain() {
 
 					case "currentroom":
 						// comment
-						messageServerUri, ok := obj.FindString(res, "body", "room", "messageServerUri")
+						messageServerUri, ok := objs.FindString(res, "body", "room", "messageServerUri")
 						if !ok {
 							break
 						}
-						threadId, ok := obj.FindString(res, "body", "room", "threadId")
+						threadId, ok := objs.FindString(res, "body", "room", "threadId")
 						if !ok {
 							break
 						}
@@ -1795,7 +1699,7 @@ func (hls *NicoHls) startMain() {
 					return NETWORK_ERROR
 				}
 			case "error":
-				code, ok := obj.FindString(res, "body", "code")
+				code, ok := objs.FindString(res, "body", "code")
 				if (! ok) {
 					log.Printf("Unknown error: %#v\n", res)
 					return ERROR_SHUTDOWN
@@ -1852,7 +1756,7 @@ func (hls *NicoHls) startMain() {
 }
 
 func (hls *NicoHls) serve(hlsPort int) {
-	hls.startMGoroutine(func(sig chan struct{}) int {
+	hls.startMGoroutine(func(sig <-chan struct{}) int {
 		gin.SetMode(gin.ReleaseMode)
 		gin.DefaultErrorWriter = ioutil.Discard
 		gin.DefaultWriter = ioutil.Discard
@@ -1928,7 +1832,7 @@ func (hls *NicoHls) Wait(testTimeout, hlsPort int) {
 	defer hls.stopInterrupt()
 
 	if testTimeout > 0 {
-		hls.startMGoroutine(func(sig chan struct{}) int {
+		hls.startMGoroutine(func(sig <-chan struct{}) int {
 			select {
 			case <-sig:
 				return GOT_SIGNAL
@@ -1945,7 +1849,6 @@ func (hls *NicoHls) Wait(testTimeout, hlsPort int) {
 
 	hls.startMain()
 	for hls.working() {
-		//hls.waitPGoroutines()
 		if hls.waitRestartMain() {
 			continue
 		}
@@ -2150,7 +2053,7 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin, reserved bool,
 	}
 
 	if false {
-		obj.PrintAsJson(props)
+		objs.PrintAsJson(props)
 		os.Exit(9)
 	}
 
@@ -2194,7 +2097,7 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin, reserved bool,
 
 	kv := map[string]interface{}{}
 	for k, a := range proplist {
-		v, ok := obj.FindVal(props, a...)
+		v, ok := objs.Find(props, a...)
 		if ok {
 			kv[k] = v
 		}
@@ -2241,16 +2144,16 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin, reserved bool,
 	}
 
 /*
-	pageUrl, _ := obj.FindString(props, "broadcaster", "pageUrl")
+	pageUrl, _ := objs.FindString(props, "broadcaster", "pageUrl")
 
 	if regexp.MustCompile(`\Ahttps?://cas\.nicovideo\.jp/.*?/.*`).MatchString(pageUrl) {
 		// 実験放送
-		userId, ok := obj.FindString(props, "broadcaster", "id")
+		userId, ok := objs.FindString(props, "broadcaster", "id")
 		if ! ok {
 			fmt.Printf("userId not found")
 		}
 
-		nickname, ok := obj.FindString(props, "broadcaster", "nickname")
+		nickname, ok := objs.FindString(props, "broadcaster", "nickname")
 		if ! ok {
 			fmt.Printf("nickname not found")
 		}

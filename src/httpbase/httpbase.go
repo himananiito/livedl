@@ -3,6 +3,7 @@ package httpbase
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"strings"
 	"net/http"
 	"net/url"
@@ -39,11 +40,12 @@ func httpBase(method, uri string, header map[string]string, body io.Reader) (res
 	if err != nil {
 		return
 	}
+
+	req.Header.Set("User-Agent", GetUserAgent())
+
 	for k, v := range header {
 		req.Header.Set(k, v)
 	}
-
-	req.Header.Set("User-Agent", GetUserAgent())
 
 	resp, neterr = Client.Do(req)
 	if neterr != nil {
@@ -60,4 +62,24 @@ func PostForm(uri string, header map[string]string, val url.Values) (*http.Respo
 	}
 	header["Content-Type"] = "application/x-www-form-urlencoded; charset=utf-8"
 	return httpBase("POST", uri, header, strings.NewReader(val.Encode()))
+}
+
+func GetBytes(uri string, header map[string]string) (code int, buff []byte, err, neterr error) {
+	resp, err, neterr := Get(uri, header)
+	if err != nil {
+		return
+	}
+	if neterr != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	buff, neterr = ioutil.ReadAll(resp.Body)
+	if neterr != nil {
+		return
+	}
+
+	code = resp.StatusCode
+
+	return
 }
