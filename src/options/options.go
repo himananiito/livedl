@@ -52,6 +52,7 @@ type Option struct {
 	NicoForceResv bool // 終了番組の上書きタイムシフト予約
 	YtNoStreamlink bool
 	YtNoYoutubeDl bool
+	NicoSkipHb bool // コメント出力時に/hbコマンドを出さない
 }
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
@@ -116,6 +117,7 @@ COMMAND:
   -nico-auto-delete-mode 2       (+) 自動変換でMP4が分割されても削除するように設定
   -nico-force-reservation=on     (+) 視聴にタイムシフト予約が必要な場合に自動的に上書きする
   -nico-force-reservation=off    (+) 自動的にタイムシフト予約しない(デフォルト)
+  -nico-skip-hb=(on|off)          (+) コメント書き出し時に/hbコマンドを出さない
 
 ツイキャス録画用オプション:
   -tcas-retry=on                 (+) 録画終了後に再試行を行う
@@ -389,7 +391,8 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "ExtractChunks"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoForceResv"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "YtNoStreamlink"), 0),
-		IFNULL((SELECT v FROM conf WHERE k == "YtNoYoutubeDl"), 0);
+		IFNULL((SELECT v FROM conf WHERE k == "YtNoYoutubeDl"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoSkipHb"), 0);
 	`).Scan(
 		&opt.NicoFormat,
 		&opt.NicoLimitBw,
@@ -408,6 +411,7 @@ func ParseArgs() (opt Option) {
 		&opt.NicoForceResv,
 		&opt.YtNoStreamlink,
 		&opt.YtNoYoutubeDl,
+		&opt.NicoSkipHb,
 	)
 	if err != nil {
 		log.Println(err)
@@ -861,6 +865,18 @@ func ParseArgs() (opt Option) {
 			}
 			return nil
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?skip-?hb(?:=(on|off))?\z`), func() (err error) {
+			if strings.EqualFold(match[1], "on") {
+				opt.NicoSkipHb = true
+				dbConfSet(db, "NicoSkipHb", opt.NicoSkipHb)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.NicoSkipHb = false
+				dbConfSet(db, "NicoSkipHb", opt.NicoSkipHb)
+			} else {
+				opt.NicoSkipHb = true
+			}
+			return nil
+		}},
 	}
 
 	checkFILE := func(arg string) bool {
@@ -981,6 +997,8 @@ func ParseArgs() (opt Option) {
 			fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
 		}
 		fmt.Printf("Conf(NicoForceResv): %#v\n", opt.NicoForceResv)
+		fmt.Printf("Conf(NicoSkipHb): %#v\n", opt.NicoSkipHb)
+
 	case "YOUTUBE":
 		fmt.Printf("Conf(YtNoStreamlink): %#v\n", opt.YtNoStreamlink)
 		fmt.Printf("Conf(YtNoYoutubeDl): %#v\n", opt.YtNoYoutubeDl)

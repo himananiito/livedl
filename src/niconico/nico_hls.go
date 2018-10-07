@@ -57,6 +57,7 @@ type NicoHls struct {
 	myUserId string
 
 	commentStarted bool
+	mtxCommentStarted sync.Mutex
 
 	chInterrupt chan os.Signal
 	nInterrupt int
@@ -493,7 +494,7 @@ func (hls *NicoHls) checkReturnCode(code int) {
 		if hls.isTimeshift {
 			if hls.commentDone {
 				hls.stopPCGoroutines()
-			} else if (! hls.commentStarted) {
+			} else if (! hls.getCommentStarted()) {
 				hls.stopPCGoroutines()
 			} else {
 				fmt.Println("waiting comment")
@@ -636,13 +637,23 @@ func (hls *NicoHls) getTsCommentFromWhen() (res_from int, when float64) {
 	return hls.dbGetFromWhen()
 }
 
+func (hls *NicoHls) setCommentStarted(val bool) {
+	hls.mtxCommentStarted.Lock()
+	defer hls.mtxCommentStarted.Unlock()
+	hls.commentStarted = val
+}
+func (hls *NicoHls) getCommentStarted() bool {
+	hls.mtxCommentStarted.Lock()
+	defer hls.mtxCommentStarted.Unlock()
+	return hls.commentStarted
+}
 func (hls *NicoHls) startComment(messageServerUri, threadId string) {
-	if (! hls.commentStarted) && (! hls.commentDone) {
-		hls.commentStarted = true
+	if (! hls.getCommentStarted()) && (! hls.commentDone) {
+		hls.setCommentStarted(true)
 
 		hls.startCGoroutine(func(sig <-chan struct{}) int {
 			defer func(){
-				hls.commentStarted = false
+				hls.setCommentStarted(false)
 			}()
 
 			var err error
