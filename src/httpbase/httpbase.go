@@ -3,8 +3,7 @@ package httpbase
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"os"
-
+//	"os"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -23,6 +22,7 @@ func init(){
 	MypemData, Myerr := ioutil.ReadFile("cert.pem")
 	if Myerr != nil {
 //		os.Exit(1)
+		Mycerts = nil
 		return
 	}
 	Mycerts.AppendCertsFromPEM(MypemData)
