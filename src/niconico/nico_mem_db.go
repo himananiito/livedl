@@ -82,18 +82,18 @@ func (hls *NicoHls) memdbCreate() (err error) {
 	return
 }
 func (hls *NicoHls) memdbSetStopBack(seqno int) {
-	hls.memdbMtx.Lock()
-	defer hls.memdbMtx.Unlock()
-
 	if hls.nicoDebug {
 		start := time.Now().UnixNano()
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbSetStopBack: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN][MEMDB]memdbSetStopBack: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
+
+	hls.memdbMtx.Lock()
+	defer hls.memdbMtx.Unlock()
 
 	_, err := hls.memdb.Exec(`
 		INSERT OR IGNORE INTO media (seqno, stopback) VALUES (?, 1);
@@ -104,101 +104,101 @@ func (hls *NicoHls) memdbSetStopBack(seqno int) {
 	}
 }
 func (hls *NicoHls) memdbGetStopBack(seqno int) (res bool) {
-	hls.memdbMtx.Lock()
-	defer hls.memdbMtx.Unlock()
-
 	if hls.nicoDebug {
 		start := time.Now().UnixNano()
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbGetStopBack: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN][MEMDB]memdbGetStopBack: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
+
+	hls.memdbMtx.Lock()
+	defer hls.memdbMtx.Unlock()
 
 	hls.memdb.QueryRow("SELECT IFNULL(stopback, 0) FROM media WHERE seqno=?", seqno).Scan(&res)
 	return
 }
 func (hls *NicoHls) memdbSet200(seqno int) {
-	hls.memdbMtx.Lock()
-	defer hls.memdbMtx.Unlock()
-
 	if hls.nicoDebug {
 		start := time.Now().UnixNano()
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbSet200: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN][MEMDB]memdbSet200: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
+
+	hls.memdbMtx.Lock()
+	defer hls.memdbMtx.Unlock()
 
 	hls.memdb.Exec(`INSERT OR REPLACE INTO media (seqno, is200) VALUES (?, 1)`, seqno)
 }
 func (hls *NicoHls) memdbSet404(seqno int) {
-	hls.memdbMtx.Lock()
-	defer hls.memdbMtx.Unlock()
-
 	if hls.nicoDebug {
 		start := time.Now().UnixNano()
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbSet404: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN][MEMDB]memdbSet404: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
+
+	hls.memdbMtx.Lock()
+	defer hls.memdbMtx.Unlock()
 
 	hls.memdb.Exec(`INSERT OR REPLACE INTO media (seqno, is404) VALUES (?, 1)`, seqno)
 }
 func (hls *NicoHls) memdbCheck200(seqno int) (res bool) {
-	hls.memdbMtx.Lock()
-	defer hls.memdbMtx.Unlock()
-
 	if hls.nicoDebug {
 		start := time.Now().UnixNano()
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbCheck200: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN][MEMDB]memdbCheck200: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
+
+	hls.memdbMtx.Lock()
+	defer hls.memdbMtx.Unlock()
 
 	hls.memdb.QueryRow("SELECT IFNULL(is200, 0) FROM media WHERE seqno=?", seqno).Scan(&res)
 	return
 }
 func (hls *NicoHls) memdbDelete(seqno int) {
-	hls.memdbMtx.Lock()
-	defer hls.memdbMtx.Unlock()
-
 	if hls.nicoDebug {
 		start := time.Now().UnixNano()
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbDelete: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN][MEMDB]memdbDelete: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
+
+	hls.memdbMtx.Lock()
+	defer hls.memdbMtx.Unlock()
 
 	min := seqno - 100
 	hls.memdb.Exec(`DELETE FROM media WHERE seqno < ?`, min)
 }
 func (hls *NicoHls) memdbCount() (res int) {
-	hls.memdbMtx.Lock()
-	defer hls.memdbMtx.Unlock()
-
 	if hls.nicoDebug {
 		start := time.Now().UnixNano()
 		defer func() {
 			t := (time.Now().UnixNano() - start) / (1000 * 1000)
 			if t > 100 {
-				fmt.Fprintf(os.Stderr, "%s:[WARN]memdbCount: %d(ms)\n", debug_Now(), t)
+				fmt.Fprintf(os.Stderr, "%s:[WARN][MEMDB]memdbCount: %d(ms)\n", debug_Now(), t)
 			}
 		}()
 	}
+
+	hls.memdbMtx.Lock()
+	defer hls.memdbMtx.Unlock()
 
 	hls.memdb.QueryRow("SELECT COUNT(seqno) FROM media").Scan(&res)
 	return

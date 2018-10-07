@@ -117,7 +117,7 @@ COMMAND:
   -nico-auto-delete-mode 2       (+) 自動変換でMP4が分割されても削除するように設定
   -nico-force-reservation=on     (+) 視聴にタイムシフト予約が必要な場合に自動的に上書きする
   -nico-force-reservation=off    (+) 自動的にタイムシフト予約しない(デフォルト)
-  -nico-skip-hb=(on|off)          (+) コメント書き出し時に/hbコマンドを出さない
+  -nico-skip-hb=(on|off)         (+) コメント書き出し時に/hbコマンドを出さない
 
 ツイキャス録画用オプション:
   -tcas-retry=on                 (+) 録画終了後に再試行を行う

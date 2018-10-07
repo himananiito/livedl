@@ -948,11 +948,16 @@ func getBytes(uri string) (code int, buff []byte, t int64, err, neterr error) {
 
 func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404, is500 bool, neterr, err error) {
 
+	var timePassed []int64
 	if hls.nicoDebug {
+		timePassed = append(timePassed, time.Now().UnixNano())
+
 		start := time.Now().UnixNano()
 		defer func() {
-			t := (time.Now().UnixNano() - start) / (1000 * 1000)
-			fmt.Fprintf(os.Stderr, "%s:saveMedia: seqno=%d, total %d(ms)\n", debug_Now(), seqno, t)
+			now := time.Now().UnixNano()
+			timePassed = append(timePassed, now)
+			t := (now - start) / (1000 * 1000)
+			fmt.Fprintf(os.Stderr, "%s:saveMedia: seqno=%d, total %d(ms) %v\n", debug_Now(), seqno, t, timePassed)
 		}()
 	}
 
@@ -975,7 +980,13 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404, is500 bool, 
 			"current": hls.playlist.seqNo,
 			"notfound": 1,
 		}
+		if hls.nicoDebug {
+			timePassed = append(timePassed, time.Now().UnixNano())
+		}
 		hls.dbInsert("media", data)
+		if hls.nicoDebug {
+			timePassed = append(timePassed, time.Now().UnixNano())
+		}
 		hls.memdbSet404(seqno)
 		is404 = true
 		return
@@ -1000,7 +1011,13 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404, is500 bool, 
 		}
 	}
 
+	if hls.nicoDebug {
+		timePassed = append(timePassed, time.Now().UnixNano())
+	}
 	hls.dbReplace("media", data)
+	if hls.nicoDebug {
+		timePassed = append(timePassed, time.Now().UnixNano())
+	}
 	hls.memdbSet200(seqno)
 
 	return

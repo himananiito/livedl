@@ -142,7 +142,7 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 			}
 
 			if continuations, ok := objs.Find(liveChatContinuation, "continuations"); ok {
-				objs.PrintAsJson(continuations)
+				//objs.PrintAsJson(continuations)
 
 				if c, ok := objs.FindString(continuations, "timedContinuationData", "continuation"); ok {
 					continuation = c

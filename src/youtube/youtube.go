@@ -195,7 +195,13 @@ func execStreamlink(gm *gorman.GoroutineManager, uri, name string) (notSupport b
 
 				notSupport = true
 				procs.Kill(cmd.Process.Pid)
+				break
+			} else if strings.HasPrefix(s, "Traceback (most recent call last):") {
+				fmt.Print(s)
 
+				notSupport = true
+				//procs.Kill(cmd.Process.Pid)
+				//break
 			} else {
 				fmt.Print(s)
 			}
@@ -371,9 +377,11 @@ func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	var interrupt bool
 	gm.Go(func(c <-chan struct{}) int {
 		select {
 		case <-chInterrupt:
+			interrupt = true
 		case <-c:
 		}
 
@@ -401,8 +409,10 @@ func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
 	if (! ytNoStreamlink) {
 		retry, err = execStreamlink(gm, uri, name)
 	}
-	if err != nil || retry || (ytNoStreamlink && (! ytNoYoutube_dl)) {
-		execYoutube_dl(gm, uri, name)
+	if !interrupt {
+		if err != nil || retry || (ytNoStreamlink && (! ytNoYoutube_dl)) {
+			execYoutube_dl(gm, uri, name)
+		}
 	}
 
 	if continuation != "" {
