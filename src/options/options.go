@@ -50,6 +50,8 @@ type Option struct {
 	ConvExt string
 	ExtractChunks bool
 	NicoForceResv bool // 終了番組の上書きタイムシフト予約
+	YtNoStreamlink bool
+	YtNoYoutubeDl bool
 }
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
@@ -123,7 +125,9 @@ COMMAND:
   -tcas-retry-interval           (+) 再試行を行う間隔（秒）デフォルト: 60秒
 
 Youtube live録画用オプション:
-  -yt-api-key <key>              (+) YouTube Data API v3 keyを設定する
+  -yt-api-key <key>              (+) YouTube Data API v3 keyを設定する(未使用)
+  -yt-no-streamlink=(on|off)     (+) Streamlinkを使用しない
+  -yt-no-youtube-dl=(on|off)     (+) youtube-dlを使用しない
 
 変換オプション:
   -extract-chunks=off            (+) -d2mで動画ファイルに書き出す(デフォルト)
@@ -383,7 +387,9 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryInterval"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "ConvExt"), ""),
 		IFNULL((SELECT v FROM conf WHERE k == "ExtractChunks"), 0),
-		IFNULL((SELECT v FROM conf WHERE k == "NicoForceResv"), 0)
+		IFNULL((SELECT v FROM conf WHERE k == "NicoForceResv"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "YtNoStreamlink"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "YtNoYoutubeDl"), 0);
 	`).Scan(
 		&opt.NicoFormat,
 		&opt.NicoLimitBw,
@@ -400,6 +406,8 @@ func ParseArgs() (opt Option) {
 		&opt.ConvExt,
 		&opt.ExtractChunks,
 		&opt.NicoForceResv,
+		&opt.YtNoStreamlink,
+		&opt.YtNoYoutubeDl,
 	)
 	if err != nil {
 		log.Println(err)
@@ -829,6 +837,30 @@ func ParseArgs() (opt Option) {
 			err = SetYoutubeApiKey(s)
 			return
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?yt-?no-?streamlink(?:=(on|off))?\z`), func() (err error) {
+			if strings.EqualFold(match[1], "on") {
+				opt.YtNoStreamlink = true
+				dbConfSet(db, "YtNoStreamlink", opt.YtNoStreamlink)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.YtNoStreamlink = false
+				dbConfSet(db, "NicoLoginOnly", opt.YtNoStreamlink)
+			} else {
+				opt.YtNoStreamlink = true
+			}
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?yt-?no-?youtube-?dl(?:=(on|off))?\z`), func() (err error) {
+			if strings.EqualFold(match[1], "on") {
+				opt.YtNoYoutubeDl = true
+				dbConfSet(db, "YtNoYoutubeDl", opt.YtNoYoutubeDl)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.YtNoYoutubeDl = false
+				dbConfSet(db, "YtNoYoutubeDl", opt.YtNoYoutubeDl)
+			} else {
+				opt.YtNoYoutubeDl = true
+			}
+			return nil
+		}},
 	}
 
 	checkFILE := func(arg string) bool {
@@ -949,6 +981,9 @@ func ParseArgs() (opt Option) {
 			fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
 		}
 		fmt.Printf("Conf(NicoForceResv): %#v\n", opt.NicoForceResv)
+	case "YOUTUBE":
+		fmt.Printf("Conf(YtNoStreamlink): %#v\n", opt.YtNoStreamlink)
+		fmt.Printf("Conf(YtNoYoutubeDl): %#v\n", opt.YtNoYoutubeDl)
 
 	case "TWITCAS":
 		fmt.Printf("Conf(TcasRetry): %#v\n", opt.TcasRetry)

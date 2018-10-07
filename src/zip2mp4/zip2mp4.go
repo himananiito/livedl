@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"time"
 	"../niconico"
+	"../youtube"
 )
 
 type ZipMp4 struct {
@@ -557,5 +558,18 @@ func ConvertDB(fileName, ext string) (done bool, nMp4s int, err error) {
 	done = true
 	nMp4s = len(zm.mp4List)
 
+	return
+}
+
+
+
+func YtComment(fileName string) (done bool, err error) {
+	db, err := sql.Open("sqlite3", fileName)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+
+	youtube.WriteComment(db, fileName)
 	return
 }

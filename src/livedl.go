@@ -11,6 +11,7 @@ import (
 	"./youtube"
 	"./zip2mp4"
 	"time"
+	"strings"
 )
 
 func main() {
@@ -102,7 +103,7 @@ func main() {
 		}
 
 	case "YOUTUBE":
-		err := youtube.Record(opt.YoutubeId)
+		err := youtube.Record(opt.YoutubeId, opt.YtNoStreamlink, opt.YtNoYoutubeDl)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -144,7 +145,10 @@ func main() {
 		}
 
 	case "DB2MP4":
-		if opt.ExtractChunks {
+		if strings.HasSuffix(opt.DBFile, ".yt.sqlite3") {
+			zip2mp4.YtComment(opt.DBFile)
+
+		} else if opt.ExtractChunks {
 			if _, err := zip2mp4.ExtractChunks(opt.DBFile); err != nil {
 				fmt.Println(err)
 				os.Exit(1)
