@@ -1,6 +1,10 @@
 package httpbase
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"os"
+
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -13,6 +17,18 @@ import (
 	"../defines"
 )
 
+var Mycerts = x509.NewCertPool()
+
+func init(){
+	MypemData, Myerr := ioutil.ReadFile("cert.pem")
+	if Myerr != nil {
+//		os.Exit(1)
+		return
+	}
+	Mycerts.AppendCertsFromPEM(MypemData)
+}
+
+
 func GetUserAgent() string {
 	return fmt.Sprintf(
 		"livedl/%s (contact: twitter=%s, email=%s)",
@@ -23,6 +39,12 @@ func GetUserAgent() string {
 }
 
 var Client = &http.Client{
+	Transport: &http.Transport{
+	    TLSClientConfig: &tls.Config{
+		RootCAs: Mycerts,
+//		InsecureSkipVerify: true,
+	    },
+	},
 	Timeout: time.Duration(5) * time.Second,
 	CheckRedirect: func(req *http.Request, via []*http.Request) (err error) {
 		if req != nil && via != nil && len(via) > 0 {
