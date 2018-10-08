@@ -7,9 +7,10 @@ import (
 
 func GetBuildNo() string {
 	return fmt.Sprintf(
-		"%v.%v-%s",
+		"%v.%v-%s-%s",
 		BuildDate,
 		BuildNo,
 		runtime.GOOS,
+		runtime.GOARCH,
 	)
 }

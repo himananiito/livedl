@@ -57,6 +57,7 @@ type NicoHls struct {
 	myUserId string
 
 	commentStarted bool
+	mtxCommentStarted sync.Mutex
 
 	chInterrupt chan os.Signal
 	nInterrupt int
@@ -493,7 +494,7 @@ func (hls *NicoHls) checkReturnCode(code int) {
 		if hls.isTimeshift {
 			if hls.commentDone {
 				hls.stopPCGoroutines()
-			} else if (! hls.commentStarted) {
+			} else if (! hls.getCommentStarted()) {
 				hls.stopPCGoroutines()
 			} else {
 				fmt.Println("waiting comment")
@@ -636,13 +637,23 @@ func (hls *NicoHls) getTsCommentFromWhen() (res_from int, when float64) {
 	return hls.dbGetFromWhen()
 }
 
+func (hls *NicoHls) setCommentStarted(val bool) {
+	hls.mtxCommentStarted.Lock()
+	defer hls.mtxCommentStarted.Unlock()
+	hls.commentStarted = val
+}
+func (hls *NicoHls) getCommentStarted() bool {
+	hls.mtxCommentStarted.Lock()
+	defer hls.mtxCommentStarted.Unlock()
+	return hls.commentStarted
+}
 func (hls *NicoHls) startComment(messageServerUri, threadId string) {
-	if (! hls.commentStarted) && (! hls.commentDone) {
-		hls.commentStarted = true
+	if (! hls.getCommentStarted()) && (! hls.commentDone) {
+		hls.setCommentStarted(true)
 
 		hls.startCGoroutine(func(sig <-chan struct{}) int {
 			defer func(){
-				hls.commentStarted = false
+				hls.setCommentStarted(false)
 			}()
 
 			var err error
@@ -937,11 +948,16 @@ func getBytes(uri string) (code int, buff []byte, t int64, err, neterr error) {
 
 func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404, is500 bool, neterr, err error) {
 
+	var timePassed []int64
 	if hls.nicoDebug {
+		timePassed = append(timePassed, time.Now().UnixNano())
+
 		start := time.Now().UnixNano()
 		defer func() {
-			t := (time.Now().UnixNano() - start) / (1000 * 1000)
-			fmt.Fprintf(os.Stderr, "%s:saveMedia: seqno=%d, total %d(ms)\n", debug_Now(), seqno, t)
+			now := time.Now().UnixNano()
+			timePassed = append(timePassed, now)
+			t := (now - start) / (1000 * 1000)
+			fmt.Fprintf(os.Stderr, "%s:saveMedia: seqno=%d, total %d(ms) %v\n", debug_Now(), seqno, t, timePassed)
 		}()
 	}
 
@@ -964,7 +980,13 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404, is500 bool, 
 			"current": hls.playlist.seqNo,
 			"notfound": 1,
 		}
+		if hls.nicoDebug {
+			timePassed = append(timePassed, time.Now().UnixNano())
+		}
 		hls.dbInsert("media", data)
+		if hls.nicoDebug {
+			timePassed = append(timePassed, time.Now().UnixNano())
+		}
 		hls.memdbSet404(seqno)
 		is404 = true
 		return
@@ -989,7 +1011,13 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404, is500 bool, 
 		}
 	}
 
+	if hls.nicoDebug {
+		timePassed = append(timePassed, time.Now().UnixNano())
+	}
 	hls.dbReplace("media", data)
+	if hls.nicoDebug {
+		timePassed = append(timePassed, time.Now().UnixNano())
+	}
 	hls.memdbSet200(seqno)
 
 	return

@@ -1,8 +1,11 @@
+/testrec/
 
 *.flv
 *.mp4
 *.ts
 *.mkv
+*.part
+*.mpg
 
 *~
 

@@ -11,6 +11,7 @@ import (
 	"./youtube"
 	"./zip2mp4"
 	"time"
+	"strings"
 )
 
 func main() {
@@ -102,7 +103,7 @@ func main() {
 		}
 
 	case "YOUTUBE":
-		err := youtube.Record(opt.YoutubeId)
+		err := youtube.Record(opt.YoutubeId, opt.YtNoStreamlink, opt.YtNoYoutubeDl)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -114,7 +115,7 @@ func main() {
 			os.Exit(1)
 		}
 		if hlsPlaylistEnd && opt.NicoAutoConvert {
-			done, nMp4s, err := zip2mp4.ConvertDB(dbname, opt.ConvExt)
+			done, nMp4s, err := zip2mp4.ConvertDB(dbname, opt.ConvExt, opt.NicoSkipHb)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
@@ -144,14 +145,17 @@ func main() {
 		}
 
 	case "DB2MP4":
-		if opt.ExtractChunks {
-			if _, err := zip2mp4.ExtractChunks(opt.DBFile); err != nil {
+		if strings.HasSuffix(opt.DBFile, ".yt.sqlite3") {
+			zip2mp4.YtComment(opt.DBFile)
+
+		} else if opt.ExtractChunks {
+			if _, err := zip2mp4.ExtractChunks(opt.DBFile, opt.NicoSkipHb); err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
 
 		} else {
-			if _, _, err := zip2mp4.ConvertDB(opt.DBFile, opt.ConvExt); err != nil {
+			if _, _, err := zip2mp4.ConvertDB(opt.DBFile, opt.ConvExt, opt.NicoSkipHb); err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}

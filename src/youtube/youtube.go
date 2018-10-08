@@ -15,14 +15,41 @@ import (
 	"../objs"
 	"../files"
 	"../procs/streamlink"
+	"../procs/youtube_dl"
 	"../gorman"
 	"../httpbase"
 
 	"strings"
+	"time"
+	"sync"
+	"../procs"
 )
 
 var Cookie = "PREF=f1=50000000&f4=4000000&hl=en"
 var UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36"
+
+var split = func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	for i := 0; i < len(data) ; i++ {
+		if data[i] == '\n' {
+			return i + 1, data[:i + 1], nil
+		}
+		if data[i] == '\r' {
+			if (i + 1) == len(data) {
+				return 0, nil, nil
+			}
+			if data[i + 1] == '\n' {
+				return i + 2, data[:i + 2], nil
+			}
+			return i + 1, data[:i + 1], nil
+		}
+	}
+
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+
+	return 0, nil, nil
+}
 
 func getChatContinuation(buff []byte) (isReplay bool, continuation string, err error) {
 
@@ -109,7 +136,171 @@ func getInfo(buff []byte) (title, ucid, author string, err error) {
 	return
 }
 
-func Record(id string) (err error) {
+func execStreamlink(gm *gorman.GoroutineManager, uri, name string) (notSupport bool, err error) {
+	cmd, stdout, stderr, err := streamlink.Open(uri, "best", "--retry-max", "10", "-o", name)
+	if err != nil {
+		return
+	}
+	defer stdout.Close()
+	defer stderr.Close()
+
+	chStdout := make(chan string, 10)
+	chStderr := make(chan string, 10)
+	chEof := make(chan struct{}, 2)
+
+	// stdout
+	gm.Go(func(c <-chan struct{}) int {
+		defer func(){
+			chEof <- struct{}{}
+		}()
+		scanner := bufio.NewScanner(stdout)
+		scanner.Split(split)
+
+		for scanner.Scan() {
+			chStdout <- scanner.Text()
+		}
+
+		return 0
+	})
+
+	// stderr
+	gm.Go(func(c <-chan struct{}) int {
+		defer func(){
+			chEof <- struct{}{}
+		}()
+		scanner := bufio.NewScanner(stderr)
+		scanner.Split(split)
+
+		for scanner.Scan() {
+			chStderr <- scanner.Text()
+		}
+
+		return 0
+	})
+
+
+	// outputs
+	gm.Go(func(c <-chan struct{}) int {
+		for {
+			var s string
+			select {
+			case s = <-chStdout:
+			case s = <-chStderr:
+			case <-chEof:
+				return 0
+			}
+
+			if strings.HasPrefix(s, "[cli][error]") {
+				fmt.Print(s)
+
+				notSupport = true
+				procs.Kill(cmd.Process.Pid)
+				break
+			} else if strings.HasPrefix(s, "Traceback (most recent call last):") {
+				fmt.Print(s)
+
+				notSupport = true
+				//procs.Kill(cmd.Process.Pid)
+				//break
+			} else {
+				fmt.Print(s)
+			}
+		}
+		return 0
+	})
+
+	cmd.Wait()
+
+	return
+}
+
+func execYoutube_dl(gm *gorman.GoroutineManager, uri, name string) (err error) {
+	defer func() {
+		part := name + ".part"
+		if _, test := os.Stat(part); test == nil {
+			if _, test := os.Stat(name); test != nil {
+				os.Rename(part, name)
+			}
+		}
+	}()
+
+	cmd, stdout, stderr, err := youtube_dl.Open("--no-mtime", "--no-color", "-o", name, uri)
+	if err != nil {
+		return
+	}
+	defer stdout.Close()
+	defer stderr.Close()
+
+	chStdout := make(chan string, 10)
+	chStderr := make(chan string, 10)
+	chEof := make(chan struct{}, 2)
+
+	// stdout
+	gm.Go(func(c <-chan struct{}) int {
+		defer func(){
+			chEof <- struct{}{}
+		}()
+		scanner := bufio.NewScanner(stdout)
+		scanner.Split(split)
+
+		for scanner.Scan() {
+			chStdout <- scanner.Text()
+		}
+
+		return 0
+	})
+
+	// stderr
+	gm.Go(func(c <-chan struct{}) int {
+		defer func(){
+			chEof <- struct{}{}
+		}()
+		scanner := bufio.NewScanner(stderr)
+		scanner.Split(split)
+
+		for scanner.Scan() {
+			chStderr <- scanner.Text()
+		}
+
+		return 0
+	})
+
+	// outputs
+	gm.Go(func(c <-chan struct{}) int {
+		var old int64
+		for {
+			var s string
+			select {
+			case s = <-chStdout:
+			case s = <-chStderr:
+			case <-chEof:
+				return 0
+			}
+
+			if strings.HasPrefix(s, "[https @ ") {
+				// ffmpeg unwanted logs
+			} else {
+				if strings.HasPrefix(s, "[download]") {
+					var now = time.Now().UnixNano()
+					if now - old > 2 * 1000 * 1000 * 1000 {
+						old = now
+					} else {
+						continue
+					}
+				}
+				fmt.Print(s)
+			}
+		}
+		return 0
+	})
+
+	cmd.Wait()
+	return
+}
+
+var COMMENT_DONE = 1000
+
+func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
 
 	uri := fmt.Sprintf("https://www.youtube.com/watch?v=%s", id)
 	code, buff, err, neterr := httpbase.GetBytes(uri, map[string]string {
@@ -147,17 +338,36 @@ func Record(id string) (err error) {
 		return
 	}
 
-fmt.Println(name)
-	cmd, stderr, err := streamlink.Open(uri, "best", "--retry-max", "10", "-o", name)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	fmt.Println(name)
+
+	mtxComDone := &sync.Mutex{}
+	var commentDone bool
 
 	var gm *gorman.GoroutineManager
+	var gmCom *gorman.GoroutineManager
+
 	gm = gorman.WithChecker(func(c int) {
-		if c != 0 {
+		switch c {
+		case 0:
+		default:
 			gm.Cancel()
+			if gmCom != nil {
+				gmCom.Cancel();
+			}
+		}
+	})
+
+	gmCom = gorman.WithChecker(func(c int) {
+		switch c {
+		case 0:
+		case COMMENT_DONE:
+			func() {
+				mtxComDone.Lock()
+				defer mtxComDone.Unlock()
+				commentDone = true;
+			}()
+		default:
+			gmCom.Cancel()
 		}
 	})
 
@@ -167,9 +377,11 @@ fmt.Println(name)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	var interrupt bool
 	gm.Go(func(c <-chan struct{}) int {
 		select {
 		case <-chInterrupt:
+			interrupt = true
 		case <-c:
 		}
 
@@ -178,31 +390,11 @@ fmt.Println(name)
 		return 1
 	})
 
-	gm.Go(func(c <-chan struct{}) int {
-		defer stderr.Close()
-		rdr := bufio.NewReader(stderr)
-		re := regexp.MustCompile(`(Written.*?)\s*\z`)
-		for {
-			select {
-			case <-c: return 0
-			default:
-			}
-
-			s, err := rdr.ReadString('\r')
-			if err != nil {
-				return 0
-			}
-			if ma := re.FindStringSubmatch(s); len(ma) > 1 {
-				fmt.Printf("%s: %s\n", name, ma[1])
-			}
-		}
-		return 0
-	})
-
 	if continuation != "" {
-		gm.Go(func(c <-chan struct{}) int {
-			getComment(gm, ctx, c, isReplay, continuation, origName)
-			return 0
+		gmCom.Go(func(c <-chan struct{}) int {
+			getComment(gmCom, ctx, c, isReplay, continuation, origName)
+			fmt.Printf("\ncomment done\n")
+			return COMMENT_DONE
 		})
 	}
 
@@ -213,8 +405,30 @@ fmt.Println(name)
 		return 0
 	})
 
+	var retry bool
+	if (! ytNoStreamlink) {
+		retry, err = execStreamlink(gm, uri, name)
+	}
+	if !interrupt {
+		if err != nil || retry || (ytNoStreamlink && (! ytNoYoutube_dl)) {
+			execYoutube_dl(gm, uri, name)
+		}
+	}
 
-	cmd.Wait()
+	if continuation != "" {
+		if isReplay {
+			if !commentDone {
+				fmt.Printf("\nwaiting comment\n")
+				gmCom.Wait()
+			} else {
+				gmCom.Wait()
+			}
+
+		} else {
+			gmCom.Cancel()
+			gmCom.Wait()
+		}
+	}
 
 	gm.Cancel()
 	gm.Wait()

@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"time"
 	"../niconico"
+	"../youtube"
 )
 
 type ZipMp4 struct {
@@ -434,14 +435,14 @@ func Convert(fileName string) (err error) {
 }
 
 
-func ExtractChunks(fileName string) (done bool, err error) {
+func ExtractChunks(fileName string, skipHb bool) (done bool, err error) {
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
 		return
 	}
 	defer db.Close()
 
-	niconico.WriteComment(db, fileName)
+	niconico.WriteComment(db, fileName, skipHb)
 
 	rows, err := db.Query(niconico.SelMedia)
 	if err != nil {
@@ -489,14 +490,14 @@ func ExtractChunks(fileName string) (done bool, err error) {
 	return
 }
 
-func ConvertDB(fileName, ext string) (done bool, nMp4s int, err error) {
+func ConvertDB(fileName, ext string, skipHb bool) (done bool, nMp4s int, err error) {
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
 		return
 	}
 	defer db.Close()
 
-	niconico.WriteComment(db, fileName)
+	niconico.WriteComment(db, fileName, skipHb)
 
 	var zm *ZipMp4
 	defer func() {
@@ -557,5 +558,18 @@ func ConvertDB(fileName, ext string) (done bool, nMp4s int, err error) {
 	done = true
 	nMp4s = len(zm.mp4List)
 
+	return
+}
+
+
+
+func YtComment(fileName string) (done bool, err error) {
+	db, err := sql.Open("sqlite3", fileName)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+
+	youtube.WriteComment(db, fileName)
 	return
 }

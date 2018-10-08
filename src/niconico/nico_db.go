@@ -281,7 +281,7 @@ func (hls *NicoHls) dbGetFromWhen() (res_from int, when float64) {
 	return
 }
 
-func WriteComment(db *sql.DB, fileName string) {
+func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 
 	rows, err := db.Query(SelComment)
 	if err != nil {
@@ -305,8 +305,8 @@ func WriteComment(db *sql.DB, fileName string) {
 		log.Fatalln(err)
 	}
 	defer f.Close()
-	fmt.Fprintln(f, `<?xml version="1.0" encoding="UTF-8"?>`)
-	fmt.Fprintln(f, `<packet>`)
+	fmt.Fprintf(f, "%s\r\n", `<?xml version="1.0" encoding="UTF-8"?>`)
+	fmt.Fprintf(f, "%s\r\n", `<packet>`)
 
 	for rows.Next() {
 		var vpos      int64
@@ -341,6 +341,12 @@ func WriteComment(db *sql.DB, fileName string) {
 			log.Println(err)
 			return
 		}
+
+		// skip /hb
+		if (premium > 1) && skipHb && strings.HasPrefix(content, "/hb ") {
+			continue
+		}
+
 		line := fmt.Sprintf(
 			`<chat thread="%d" vpos="%d" date="%d" date_usec="%d" user_id="%s"`,
 			thread,
@@ -385,9 +391,9 @@ func WriteComment(db *sql.DB, fileName string) {
 		content = strings.Replace(content, "<", "&lt;", -1)
 		line += content
 		line += "</chat>"
-		fmt.Fprintln(f, line)
+		fmt.Fprintf(f, "%s\r\n", line)
 	}
-	fmt.Fprintln(f, `</packet>`)
+	fmt.Fprintf(f, "%s\r\n", `</packet>`)
 }
 
 // ts
