@@ -344,8 +344,8 @@ func WriteComment(db *sql.DB, fileName string) {
 		log.Fatalln(err)
 	}
 	defer f.Close()
-	fmt.Fprintln(f, `<?xml version="1.0" encoding="UTF-8"?>`)
-	fmt.Fprintln(f, `<packet>`)
+	fmt.Fprintf(f, "%s\r\n", `<?xml version="1.0" encoding="UTF-8"?>`)
+	fmt.Fprintf(f, "%s\r\n", `<packet>`)
 
 	firstOffsetUsec := int64(-1)
 
@@ -392,7 +392,7 @@ func WriteComment(db *sql.DB, fileName string) {
 		message = strings.Replace(message, "<", "&lt;", -1)
 		line += message
 		line += "</chat>"
-		fmt.Fprintln(f, line)
+		fmt.Fprintf(f, "%s\r\n", line)
 	}
-	fmt.Fprintln(f, `</packet>`)
+	fmt.Fprintf(f, "%s\r\n", `</packet>`)
 }
