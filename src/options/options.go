@@ -41,6 +41,7 @@ type Option struct {
 	DBFile string
 	NicoHlsPort int
 	NicoLimitBw int
+    NicoTsStart float64
 	NicoFormat string
 	NicoFastTs bool
 	NicoUltraFastTs bool
@@ -698,6 +699,18 @@ func ParseArgs() (opt Option) {
 			}
 			opt.NicoLimitBw = num
 			dbConfSet(db, "NicoLimitBw", opt.NicoLimitBw)
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?ts-?start\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--nico-ts-start: Not a number %s\n", s)
+			}
+			opt.NicoTsStart = float64(num)
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?(?:format|fmt)\z`), func() (err error) {

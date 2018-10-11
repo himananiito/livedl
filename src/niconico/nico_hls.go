@@ -262,7 +262,9 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		gmCmnt: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
 		gmDB: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
 		gmMain: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
-	}
+
+	timeshiftStart: opt.NicoTsStart,
+}
 
 	hls.fastTimeshiftOrig = hls.fastTimeshift
 	hls.ultrafastTimeshiftOrig = hls.ultrafastTimeshift
@@ -1418,8 +1420,9 @@ func (hls *NicoHls) startPlaylist(uri string) {
 		}
 
 		if hls.isTimeshift {
-			hls.timeshiftStart = hls.dbGetLastPosition()
-
+			if (hls.timeshiftStart == 0) {
+				hls.timeshiftStart = hls.dbGetLastPosition()
+			}
 			u := hls.playlist.uriTimeshiftMaster.String()
 			u = regexp.MustCompile(`&start=\d+(?:\.\d*)?`).ReplaceAllString(u, "")
 			u += fmt.Sprintf("&start=%f", hls.timeshiftStart)
