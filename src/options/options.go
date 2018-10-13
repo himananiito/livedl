@@ -41,6 +41,7 @@ type Option struct {
 	DBFile string
 	NicoHlsPort int
 	NicoLimitBw int
+    NicoTsStart float64
 	NicoFormat string
 	NicoFastTs bool
 	NicoUltraFastTs bool
@@ -53,6 +54,9 @@ type Option struct {
 	YtNoStreamlink bool
 	YtNoYoutubeDl bool
 	NicoSkipHb bool // コメント出力時に/hbコマンドを出さない
+	HttpRootCA string
+	HttpSkipVerify bool
+	HttpProxy string
 }
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
@@ -118,6 +122,7 @@ COMMAND:
   -nico-force-reservation=on     (+) 視聴にタイムシフト予約が必要な場合に自動的に上書きする
   -nico-force-reservation=off    (+) 自動的にタイムシフト予約しない(デフォルト)
   -nico-skip-hb=(on|off)         (+) コメント書き出し時に/hbコマンドを出さない
+  -nico-ts-start <num>           タイムシフトの録画を指定した時間(秒)から開始する
 
 ツイキャス録画用オプション:
   -tcas-retry=on                 (+) 録画終了後に再試行を行う
@@ -162,6 +167,13 @@ FILE:
   -nico-test-format        フォーマット、保存しない
   -nico-ufast-ts           TS保存にウェイトを入れない
   -nico-debug              デバッグ用ログ出力する
+
+HTTP関連
+  -http-root-ca <file>    ルート証明書ファイルを指定(pem/der)
+  -http-skip-verify       TLS証明書の認証をスキップする
+  -http-proxy <proxy url> [警告] proxyを設定する
+[警告] 情報流出に注意。信頼できるproxy serverのみに使用すること。
+
 `)
 			break
 		}
@@ -700,6 +712,18 @@ func ParseArgs() (opt Option) {
 			dbConfSet(db, "NicoLimitBw", opt.NicoLimitBw)
 			return nil
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?ts-?start\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--nico-ts-start: Not a number %s\n", s)
+			}
+			opt.NicoTsStart = float64(num)
+			return nil
+		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?(?:format|fmt)\z`), func() (err error) {
 			s, err := nextArg()
 			if err != nil {
@@ -876,6 +900,29 @@ func ParseArgs() (opt Option) {
 				opt.NicoSkipHb = true
 			}
 			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?http-?root-?ca\z`), func() (err error) {
+			str, err := nextArg()
+			if err != nil {
+				return
+			}
+			opt.HttpRootCA = str
+			return
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?http-?skip-?verify\z`), func() (err error) {
+			opt.HttpSkipVerify = true
+			return
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?http-?proxy\z`), func() (err error) {
+			str, err := nextArg()
+			if err != nil {
+				return
+			}
+			if !strings.Contains(str, "://") {
+				str = "http://" + str
+			}
+			opt.HttpProxy = str
+			return
 		}},
 	}
 

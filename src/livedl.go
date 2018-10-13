@@ -12,6 +12,7 @@ import (
 	"./zip2mp4"
 	"time"
 	"strings"
+	"./httpbase"
 )
 
 func main() {
@@ -49,6 +50,26 @@ func main() {
 	}
 
 	opt := options.ParseArgs()
+
+	// http
+	if opt.HttpRootCA != "" {
+		if err := httpbase.SetRootCA(opt.HttpRootCA); err != nil {
+			fmt.Println(err)
+			return
+		}
+	}
+	if opt.HttpSkipVerify {
+		if err := httpbase.SetSkipVerify(true); err != nil {
+			fmt.Println(err)
+			return
+		}
+	}
+	if opt.HttpProxy != "" {
+		if err := httpbase.SetProxy(opt.HttpProxy); err != nil {
+			fmt.Println(err)
+			return
+		}
+	}
 
 	switch opt.Command {
 	default:

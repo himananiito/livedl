@@ -262,7 +262,9 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		gmCmnt: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
 		gmDB: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
 		gmMain: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
-	}
+
+	timeshiftStart: opt.NicoTsStart,
+}
 
 	hls.fastTimeshiftOrig = hls.fastTimeshift
 	hls.ultrafastTimeshiftOrig = hls.ultrafastTimeshift
@@ -316,14 +318,14 @@ func (hls *NicoHls) commentHandler(tag string, attr interface{}) (err error) {
 	}
 	//fmt.Printf("%#v\n", attrMap)
 	if vpos_f, ok := attrMap["vpos"].(float64); ok {
-		vpos := int(vpos_f)
-		var date int
+		vpos := int64(vpos_f)
+		var date int64
 		if d, ok := attrMap["date"].(float64); ok {
-			date = int(d)
+			date = int64(d)
 		}
-		var date_usec int
+		var date_usec int64
 		if d, ok := attrMap["date_usec"].(float64); ok {
-			date_usec = int(d)
+			date_usec = int64(d)
 		}
 		date2 := (date * 1000 * 1000) + date_usec
 		var user_id string
@@ -1418,8 +1420,9 @@ func (hls *NicoHls) startPlaylist(uri string) {
 		}
 
 		if hls.isTimeshift {
-			hls.timeshiftStart = hls.dbGetLastPosition()
-
+			if (hls.timeshiftStart == 0) {
+				hls.timeshiftStart = hls.dbGetLastPosition()
+			}
 			u := hls.playlist.uriTimeshiftMaster.String()
 			u = regexp.MustCompile(`&start=\d+(?:\.\d*)?`).ReplaceAllString(u, "")
 			u += fmt.Sprintf("&start=%f", hls.timeshiftStart)
