@@ -36,6 +36,8 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 		continuation = testContinuation
 	}
 
+	var printTime int64
+
 	MAINLOOP: for {
 		select {
 		case <-ctx.Done(): break MAINLOOP
@@ -79,10 +81,11 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 			}
 
 			if actions, ok := objs.FindArray(liveChatContinuation, "actions"); ok {
+				var videoOffsetTimeMsec string
+
 				for _, a := range actions {
 					var item interface{}
 					var ok bool
-					var videoOffsetTimeMsec string
 					item, ok = objs.Find(a, "addChatItemAction", "item")
 					if (! ok) {
 						item, ok = objs.Find(a, "addLiveChatTickerItemAction", "item")
@@ -138,6 +141,22 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 					)
 					count++
 				}
+
+				// アーカイブ時、20秒毎に進捗を表示
+				if videoOffsetTimeMsec != "" {
+					now := time.Now().Unix()
+					if now - printTime > 20 {
+						printTime = now
+						if msec, e := strconv.ParseInt(videoOffsetTimeMsec, 10, 64); e == nil {
+							total := msec / 1000
+							hour := total / 3600
+							min := (total % 3600) / 60
+							sec := (total % 3600) % 60
+							fmt.Printf("comment pos: %02d:%02d:%02d\n", hour, min, sec)
+						}
+					}
+				}
+
 				//fmt.Println("------------")
 			}
 
