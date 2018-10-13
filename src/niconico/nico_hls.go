@@ -1926,9 +1926,11 @@ func postTsRsvBase(num int, vid, session string) (err error) {
 
 	var token string
 	if ma := regexp.MustCompile(
-	`TimeshiftActions\.(?:doRegister|confirmToWatch)\(['"].*?['"]\s*,\s*['"](.+?)['"]`).
+	`TimeshiftActions\.(doRegister|confirmToWatch|moveWatch)\(['"].*?['"]\s*(?:,\s*['"](.+?)['"])`).
 	FindStringSubmatch(dat0); len(ma) > 0 {
-		token = ma[1]
+		if len(ma) > 2 {
+			token = ma[2]
+		}
 	} else if strings.Contains(dat0, "視聴済み") {
 		err = fmt.Errorf("postTsRsv: already watched")
 		return

@@ -166,7 +166,7 @@ func createFileUser(user string, movieId uint64) (f *os.File, filename string, e
 func TwitcasRecord(user, proxy string) (done, dbLocked bool) {
 	conn, movieId, err := getStream(user, proxy)
 	if err != nil {
-		fmt.Printf("@err %v\n", err)
+		fmt.Printf("@err getStream: %v\n", err)
 		return
 	}
 	if conn == nil {
@@ -232,10 +232,10 @@ func TwitcasRecord(user, proxy string) (done, dbLocked bool) {
 	}
 
 	for {
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		messageType, data, err := conn.ReadMessage()
 		if err != nil {
-			fmt.Printf("@err %v\n\n", err)
+			fmt.Printf("@err ReadMessage: %v\n\n", err)
 			return
 		}
 
