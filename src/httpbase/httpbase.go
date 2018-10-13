@@ -3,7 +3,7 @@ package httpbase
 import (
 	"crypto/tls"
 	"crypto/x509"
-//	"os"
+	"os"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,20 +14,9 @@ import (
 	"errors"
 	"../buildno"
 	"../defines"
+
+	"encoding/pem"
 )
-
-var Mycerts = x509.NewCertPool()
-
-func init(){
-	MypemData, Myerr := ioutil.ReadFile("cert.pem")
-	if Myerr != nil {
-//		os.Exit(1)
-		Mycerts = nil
-		return
-	}
-	Mycerts.AppendCertsFromPEM(MypemData)
-}
-
 
 func GetUserAgent() string {
 	return fmt.Sprintf(
@@ -39,12 +28,6 @@ func GetUserAgent() string {
 }
 
 var Client = &http.Client{
-	Transport: &http.Transport{
-	    TLSClientConfig: &tls.Config{
-		RootCAs: Mycerts,
-//		InsecureSkipVerify: true,
-	    },
-	},
 	Timeout: time.Duration(5) * time.Second,
 	CheckRedirect: func(req *http.Request, via []*http.Request) (err error) {
 		if req != nil && via != nil && len(via) > 0 {
@@ -56,8 +39,87 @@ var Client = &http.Client{
 		return nil
 	},
 }
-func httpBase(method, uri string, header map[string]string, body io.Reader) (resp *http.Response, err, neterr error) {
 
+func checkTransport() bool {
+	if Client.Transport == nil {
+		Client.Transport = &http.Transport{}
+	}
+	switch Client.Transport.(type) {
+	case *http.Transport:
+		return true
+	}
+	return false
+}
+func checkTLSClientConfig() bool {
+	if !checkTransport() {
+		return false
+	}
+
+	if Client.Transport.(*http.Transport).TLSClientConfig == nil {
+		Client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{}
+	}
+
+	return true
+}
+func SetRootCA(file string) (err error) {
+	if ! checkTLSClientConfig() {
+		err = fmt.Errorf("SetRootCA: check failed")
+		return
+	}
+
+	dat, err := ioutil.ReadFile(file)
+	if err != nil {
+		return
+	}
+
+	// try decode pem
+	if block, _ := pem.Decode(dat); block != nil {
+		dat = block.Bytes
+	}
+
+	certs, err := x509.ParseCertificates(dat)
+	if err != nil {
+		return
+	}
+	if certs == nil {
+		err = fmt.Errorf("ParseCertificates failed")
+		return
+	}
+
+	if len(certs) > 0 {
+		if Client.Transport.(*http.Transport).TLSClientConfig.RootCAs == nil {
+			Client.Transport.(*http.Transport).TLSClientConfig.RootCAs = x509.NewCertPool()
+		}
+	}
+
+	for _, cert := range certs {
+		Client.Transport.(*http.Transport).TLSClientConfig.RootCAs.AddCert(cert)
+	}
+
+	return
+}
+func SetSkipVerify(skip bool) (err error) {
+	if checkTLSClientConfig() {
+		Client.Transport.(*http.Transport).TLSClientConfig.InsecureSkipVerify = skip
+	} else {
+		err = fmt.Errorf("SetSkipVerify(%#v): check failed", skip)
+	}
+	return
+}
+func SetProxy(rawurl string) (err error) {
+	if ! checkTransport() {
+		return fmt.Errorf("SetProxy(%#v): check failed", rawurl)
+	}
+
+	u, err := url.Parse(rawurl)
+	if err != nil {
+		return
+	}
+	Client.Transport.(*http.Transport).Proxy = http.ProxyURL(u)
+	return
+}
+
+func httpBase(method, uri string, header map[string]string, body io.Reader) (resp *http.Response, err, neterr error) {
 	req, err := http.NewRequest(method, uri, body)
 	if err != nil {
 		return
@@ -71,6 +133,10 @@ func httpBase(method, uri string, header map[string]string, body io.Reader) (res
 
 	resp, neterr = Client.Do(req)
 	if neterr != nil {
+		if strings.Contains(neterr.Error(), "x509: certificate signed by unknown") {
+			fmt.Println(neterr)
+			os.Exit(10)
+		}
 		return
 	}
 	return
