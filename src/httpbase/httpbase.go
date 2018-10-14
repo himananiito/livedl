@@ -12,10 +12,12 @@ import (
 	"net/url"
 	"time"
 	"errors"
+	"encoding/json"
+	"encoding/pem"
+	"bytes"
+
 	"../buildno"
 	"../defines"
-
-	"encoding/pem"
 )
 
 func GetUserAgent() string {
@@ -73,10 +75,26 @@ func SetRootCA(file string) (err error) {
 	}
 
 	// try decode pem
-	if block, _ := pem.Decode(dat); block != nil {
-		dat = block.Bytes
+	var nDecode int
+	for len(dat) > 0 {
+		block, d := pem.Decode(dat)
+		if block == nil {
+			break
+		}
+		dat = d
+		nDecode++
+		if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
+			continue
+		}
+		addCert(block.Bytes)
+	}
+	if nDecode < 1 {
+		addCert(dat)
 	}
 
+	return
+}
+func addCert(dat []byte) (err error) {
 	certs, err := x509.ParseCertificates(dat)
 	if err != nil {
 		return
@@ -95,9 +113,9 @@ func SetRootCA(file string) (err error) {
 	for _, cert := range certs {
 		Client.Transport.(*http.Transport).TLSClientConfig.RootCAs.AddCert(cert)
 	}
-
 	return
 }
+
 func SetSkipVerify(skip bool) (err error) {
 	if checkTLSClientConfig() {
 		Client.Transport.(*http.Transport).TLSClientConfig.InsecureSkipVerify = skip
@@ -150,6 +168,18 @@ func PostForm(uri string, header map[string]string, val url.Values) (*http.Respo
 	}
 	header["Content-Type"] = "application/x-www-form-urlencoded; charset=utf-8"
 	return httpBase("POST", uri, header, strings.NewReader(val.Encode()))
+}
+func PostJson(uri string, header map[string]string, data interface{}) (*http.Response, error, error) {
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return nil, err, nil
+	}
+
+	if header == nil {
+		header = make(map[string]string)
+	}
+	header["Content-Type"] = "application/json"
+	return httpBase("POST", uri, header, bytes.NewReader(encoded))
 }
 
 func GetBytes(uri string, header map[string]string) (code int, buff []byte, err, neterr error) {
