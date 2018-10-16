@@ -67,5 +67,9 @@ func ReplaceForbidden(name string) (fileName string) {
 
 	fileName = regexp.MustCompile(`\p{Zs}+`).ReplaceAllString(fileName, " ")
 	fileName = regexp.MustCompile(`\A\p{Zs}+|\p{Zs}+\z`).ReplaceAllString(fileName, "")
+
+	// 末尾が.であるようなファイルは作れない
+	fileName = regexp.MustCompile(`\.\p{Zs}*\z`).ReplaceAllString(fileName, "．")
+
 	return
 }
