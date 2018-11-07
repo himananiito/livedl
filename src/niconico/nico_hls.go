@@ -1689,6 +1689,8 @@ func (hls *NicoHls) startMain() {
 										return MAIN_TEMPORARILY_ERROR
 									case "TOO_MANY_CONNECTIONS":
 										return MAIN_DISCONNECT
+									case "TEMPORARILY_CROWDED":
+										return MAIN_END_PROGRAM
 									}
 								}
 							}

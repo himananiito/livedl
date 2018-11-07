@@ -169,7 +169,8 @@ func PostForm(uri string, header map[string]string, val url.Values) (*http.Respo
 	header["Content-Type"] = "application/x-www-form-urlencoded; charset=utf-8"
 	return httpBase("POST", uri, header, strings.NewReader(val.Encode()))
 }
-func PostJson(uri string, header map[string]string, data interface{}) (*http.Response, error, error) {
+func reqJson(method, uri string, header map[string]string, data interface{}) (
+	*http.Response, error, error) {
 	encoded, err := json.Marshal(data)
 	if err != nil {
 		return nil, err, nil
@@ -179,9 +180,21 @@ func PostJson(uri string, header map[string]string, data interface{}) (*http.Res
 		header = make(map[string]string)
 	}
 	header["Content-Type"] = "application/json"
-	return httpBase("POST", uri, header, bytes.NewReader(encoded))
-}
 
+	return httpBase(method, uri, header, bytes.NewReader(encoded))
+}
+func PostJson(uri string, header map[string]string, data interface{}) (*http.Response, error, error) {
+	return reqJson("POST", uri, header, data)
+}
+func PutJson(uri string, header map[string]string, data interface{}) (*http.Response, error, error) {
+	return reqJson("PUT", uri, header, data)
+}
+func PostData(uri string, header map[string]string, data io.Reader) (*http.Response, error, error) {
+	if header == nil {
+		header = make(map[string]string)
+	}
+	return httpBase("POST", uri, header, data)
+}
 func GetBytes(uri string, header map[string]string) (code int, buff []byte, err, neterr error) {
 	resp, err, neterr := Get(uri, header)
 	if err != nil {
