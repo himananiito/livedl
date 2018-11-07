@@ -121,8 +121,9 @@ COMMAND:
   -nico-auto-delete-mode 2       (+) 自動変換でMP4が分割されても削除するように設定
   -nico-force-reservation=on     (+) 視聴にタイムシフト予約が必要な場合に自動的に上書きする
   -nico-force-reservation=off    (+) 自動的にタイムシフト予約しない(デフォルト)
-  -nico-skip-hb=(on|off)         (+) コメント書き出し時に/hbコマンドを出さない
-  -nico-ts-start <num>           タイムシフトの録画を指定した時間(秒)から開始する
+  -nico-skip-hb=on               (+) コメント書き出し時に/hbコマンドを出さない
+  -nico-skip-hb=off              (+) コメント書き出し時に/hbコマンドも出す(デフォルト)
+  -nico-ts-start <num>           タイムシフトの録画を指定した再生時間(秒)から開始する
 
 ツイキャス録画用オプション:
   -tcas-retry=on                 (+) 録画終了後に再試行を行う
@@ -133,12 +134,14 @@ COMMAND:
 
 Youtube live録画用オプション:
   -yt-api-key <key>              (+) YouTube Data API v3 keyを設定する(未使用)
-  -yt-no-streamlink=(on|off)     (+) Streamlinkを使用しない
-  -yt-no-youtube-dl=(on|off)     (+) youtube-dlを使用しない
+  -yt-no-streamlink=on           (+) Streamlinkを使用しない
+  -yt-no-streamlink=off          (+) Streamlinkを使用する(デフォルト)
+  -yt-no-youtube-dl=on           (+) youtube-dlを使用しない
+  -yt-no-youtube-dl=off          (+) youtube-dlを使用する(デフォルト)
 
 変換オプション:
   -extract-chunks=off            (+) -d2mで動画ファイルに書き出す(デフォルト)
-  -extract-chunks=on             (+) -d2mで各々のチャンクを書き出す(大量のファイルが生成される)
+  -extract-chunks=on             (+) [上級者向] 各々のフラグメントを書き出す(大量のファイルが生成される)
   -conv-ext=mp4                  (+) -d2mで出力の拡張子を.mp4とする(デフォルト)
   -conv-ext=ts                   (+) -d2mで出力の拡張子を.tsとする
 
@@ -871,7 +874,7 @@ func ParseArgs() (opt Option) {
 				dbConfSet(db, "YtNoStreamlink", opt.YtNoStreamlink)
 			} else if strings.EqualFold(match[1], "off") {
 				opt.YtNoStreamlink = false
-				dbConfSet(db, "NicoLoginOnly", opt.YtNoStreamlink)
+				dbConfSet(db, "YtNoStreamlink", opt.YtNoStreamlink)
 			} else {
 				opt.YtNoStreamlink = true
 			}
