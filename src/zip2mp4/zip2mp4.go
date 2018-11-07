@@ -20,6 +20,7 @@ import (
 	"time"
 	"../niconico"
 	"../youtube"
+	"../procs/ffmpeg"
 )
 
 type ZipMp4 struct {
@@ -178,15 +179,16 @@ func (z *ZipMp4) OpenFFMpeg(ext string) {
 	z.Mp4NameOpened = name
 	z.mp4List = append(z.mp4List, name)
 
-	cmd, stdin, _, _ := openFFMpeg(true, false, false, true, []string{
+
+	cmd, stdin, err := ffmpeg.Open(
 		"-i", "-",
 		"-c", "copy",
 		//"-movflags", "faststart", // test
 		"-y",
 		name,
-	})
-	if cmd == nil {
-		log.Fatalln("ffmpeg not installed")
+	)
+	if err != nil {
+		log.Fatalln(err)
 	}
 
 	z.FFMpeg = cmd
