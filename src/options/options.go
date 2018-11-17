@@ -124,6 +124,7 @@ COMMAND:
   -nico-skip-hb=on               (+) コメント書き出し時に/hbコマンドを出さない
   -nico-skip-hb=off              (+) コメント書き出し時に/hbコマンドも出す(デフォルト)
   -nico-ts-start <num>           タイムシフトの録画を指定した再生時間(秒)から開始する
+  -nico-ts-start-min <num>       タイムシフトの録画を指定した再生時間(分)から開始する
 
 ツイキャス録画用オプション:
   -tcas-retry=on                 (+) 録画終了後に再試行を行う
@@ -725,6 +726,18 @@ func ParseArgs() (opt Option) {
 				return fmt.Errorf("--nico-ts-start: Not a number %s\n", s)
 			}
 			opt.NicoTsStart = float64(num)
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?ts-?start-?min\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--nico-ts-start-min: Not a number %s\n", s)
+			}
+			opt.NicoTsStart = float64(num*60)
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?(?:format|fmt)\z`), func() (err error) {
