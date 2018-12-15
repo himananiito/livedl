@@ -3,7 +3,7 @@
 use strict;
 use v5.20;
 
-for my $file("livedl.exe", "livedl-logger.exe") {
+for my $file("livedl.exe", "livedl.x86.exe", "livedl-logger.exe") {
 	open my $f, "<:raw", $file or die;
 	undef $/;
 	my $s = <$f>;

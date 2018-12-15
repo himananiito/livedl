@@ -82,4 +82,34 @@ go build src/livedl.go
 livedl (20180807.22-linux)
 ```
 
+## Windows(32bit及び64bit上での32bit向け)コンパイル方法
+
+### gccのインストール
+
+gcc には必ず以下を使用すること。
+
+http://tdm-gcc.tdragon.net/download
+
+環境変数で（例）`C:\TDM-GCC-64\bin`が他のgccより優先されるように設定すること。
+
+### 必要なgoのモジュール
+
+linuxの説明に倣ってインストールする。
+
+### コンパイル
+
+PowerSellで、`build-386.ps1` を実行する。または以下を実行する。
+
+```
+set-item env:GOARCH -value 386
+set-item env:CGO_ENABLED -value 1
+go build -o livedl.x86.exe src/livedl.go
+```
+
+## 32bit環境で`x509: certificate signed by unknown authority`が出る
+
+動けばいいのであればオプションで以下を指定する。
+
+`-http-skip-verify=on`
+
 以上

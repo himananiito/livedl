@@ -1,63 +1,66 @@
 package options
 
 import (
+	"database/sql"
 	"fmt"
-	"regexp"
-	"os"
+	"io/ioutil"
 	"log"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
-	"path/filepath"
-	"io/ioutil"
-	"database/sql"
-	"golang.org/x/crypto/sha3"
+
 	"../buildno"
 	"../cryptoconf"
 	"../files"
+	"golang.org/x/crypto/sha3"
 )
+
 var DefaultTcasRetryTimeoutMinute = 5 // TcasRetryTimeoutMinute
-var DefaultTcasRetryInterval = 60 // TcasRetryInterval
+var DefaultTcasRetryInterval = 60     // TcasRetryInterval
 
 type Option struct {
-	Command string
-	NicoLiveId string
-	NicoStatusHTTPS bool
-	NicoSession string
-	NicoLoginAlias string
-	NicoRtmpMaxConn int
-	NicoRtmpOnly bool
-	NicoRtmpIndex map[int]bool
-	NicoHlsOnly bool
-	NicoLoginOnly bool
-	NicoTestTimeout int
-	TcasId string
-	TcasRetry bool
+	Command                string
+	NicoLiveId             string
+	NicoStatusHTTPS        bool
+	NicoSession            string
+	NicoLoginAlias         string
+	NicoRtmpMaxConn        int
+	NicoRtmpOnly           bool
+	NicoRtmpIndex          map[int]bool
+	NicoHlsOnly            bool
+	NicoLoginOnly          bool
+	NicoTestTimeout        int
+	TcasId                 string
+	TcasRetry              bool
 	TcasRetryTimeoutMinute int // 再試行を終了する時間(初回終了または録画終了からの時間「分」)
-	TcasRetryInterval int // 再試行を行うまでの待ち時間
-	YoutubeId string
-	ConfFile string // deprecated
-	ConfPass string // deprecated
-	ZipFile string
-	DBFile string
-	NicoHlsPort int
-	NicoLimitBw int
-    NicoTsStart float64
-	NicoFormat string
-	NicoFastTs bool
-	NicoUltraFastTs bool
-	NicoAutoConvert bool
-	NicoAutoDeleteDBMode int // 0:削除しない 1:mp4が分割されなかったら削除 2:分割されても削除
-	NicoDebug bool // デバッグ情報の記録
-	ConvExt string
-	ExtractChunks bool
-	NicoForceResv bool // 終了番組の上書きタイムシフト予約
-	YtNoStreamlink bool
-	YtNoYoutubeDl bool
-	NicoSkipHb bool // コメント出力時に/hbコマンドを出さない
-	HttpRootCA string
-	HttpSkipVerify bool
-	HttpProxy string
+	TcasRetryInterval      int // 再試行を行うまでの待ち時間
+	YoutubeId              string
+	ConfFile               string // deprecated
+	ConfPass               string // deprecated
+	ZipFile                string
+	DBFile                 string
+	NicoHlsPort            int
+	NicoLimitBw            int
+	NicoTsStart            float64
+	NicoFormat             string
+	NicoFastTs             bool
+	NicoUltraFastTs        bool
+	NicoAutoConvert        bool
+	NicoAutoDeleteDBMode   int  // 0:削除しない 1:mp4が分割されなかったら削除 2:分割されても削除
+	NicoDebug              bool // デバッグ情報の記録
+	ConvExt                string
+	ExtractChunks          bool
+	NicoForceResv          bool // 終了番組の上書きタイムシフト予約
+	YtNoStreamlink         bool
+	YtNoYoutubeDl          bool
+	NicoSkipHb             bool // コメント出力時に/hbコマンドを出さない
+	HttpRootCA             string
+	HttpSkipVerify         bool
+	HttpProxy              string
 }
+
 func getCmd() (cmd string) {
 	cmd = filepath.Base(os.Args[0])
 	ext := filepath.Ext(cmd)
@@ -145,6 +148,11 @@ Youtube live録画用オプション:
   -extract-chunks=on             (+) [上級者向] 各々のフラグメントを書き出す(大量のファイルが生成される)
   -conv-ext=mp4                  (+) -d2mで出力の拡張子を.mp4とする(デフォルト)
   -conv-ext=ts                   (+) -d2mで出力の拡張子を.tsとする
+
+HTTP関連
+  -http-skip-verify=on           (+) TLS証明書の認証をスキップする (32bit版対策)
+  -http-skip-verify=off          (+) TLS証明書の認証をスキップしない (デフォルト)
+
 
 (+)のついたオプションは、次回も同じ設定が使用されることを示す。
 
@@ -236,7 +244,7 @@ func SetNicoSession(hash, session string) (err error) {
 	}
 	return
 }
-func LoadNicoAccount(alias string) (user, pass, session string, err error){
+func LoadNicoAccount(alias string) (user, pass, session string, err error) {
 	db, err := dbAccountOpen()
 	if err != nil {
 		if db != nil {
@@ -270,7 +278,7 @@ func SetYoutubeApiKey(key string) (err error) {
 	fmt.Printf("Youtube API KEY saved.\n")
 	return
 }
-func LoadYoutubeApiKey() (key string, err error){
+func LoadYoutubeApiKey() (key string, err error) {
 	db, err := dbAccountOpen()
 	if err != nil {
 		if db != nil {
@@ -354,7 +362,6 @@ func dbAccountOpen() (db *sql.DB, err error) {
 	return
 }
 
-
 func dbOpen() (db *sql.DB, err error) {
 	db, err = sql.Open("sqlite3", "conf.db")
 	if err != nil {
@@ -408,7 +415,8 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "NicoForceResv"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "YtNoStreamlink"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "YtNoYoutubeDl"), 0),
-		IFNULL((SELECT v FROM conf WHERE k == "NicoSkipHb"), 0);
+		IFNULL((SELECT v FROM conf WHERE k == "NicoSkipHb"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "HttpSkipVerify"), 0);
 	`).Scan(
 		&opt.NicoFormat,
 		&opt.NicoLimitBw,
@@ -428,6 +436,7 @@ func ParseArgs() (opt Option) {
 		&opt.YtNoStreamlink,
 		&opt.YtNoYoutubeDl,
 		&opt.NicoSkipHb,
+		&opt.HttpSkipVerify,
 	)
 	if err != nil {
 		log.Println(err)
@@ -472,14 +481,14 @@ func ParseArgs() (opt Option) {
 		}},
 		Parser{regexp.MustCompile(`\A(https?://(?:[^/]*@)?(?:[^/]*\.)*nicovideo\.jp(?::[^/]*)?/(?:[^/]*?/)*)?(lv\d+)(?:\?.*)?\z`), func() error {
 			switch opt.Command {
-				default:
-					fmt.Printf("Use \"--\" option for FILE for %s\n", opt.Command)
-					Help()
-				case "", "NICOLIVE":
-					opt.NicoLiveId = match[2]
-					opt.Command = "NICOLIVE"
-				case "NICOLIVE_TEST":
-					opt.NicoLiveId = match[2]
+			default:
+				fmt.Printf("Use \"--\" option for FILE for %s\n", opt.Command)
+				Help()
+			case "", "NICOLIVE":
+				opt.NicoLiveId = match[2]
+				opt.Command = "NICOLIVE"
+			case "NICOLIVE_TEST":
+				opt.NicoLiveId = match[2]
 			}
 			return nil
 		}},
@@ -737,7 +746,7 @@ func ParseArgs() (opt Option) {
 			if err != nil {
 				return fmt.Errorf("--nico-ts-start-min: Not a number %s\n", s)
 			}
-			opt.NicoTsStart = float64(num*60)
+			opt.NicoTsStart = float64(num * 60)
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?(?:format|fmt)\z`), func() (err error) {
@@ -925,8 +934,17 @@ func ParseArgs() (opt Option) {
 			opt.HttpRootCA = str
 			return
 		}},
-		Parser{regexp.MustCompile(`\A(?i)--?http-?skip-?verify\z`), func() (err error) {
-			opt.HttpSkipVerify = true
+		Parser{regexp.MustCompile(`\A(?i)--?http-?skip-?verify(?:=(on|off))?\z`), func() (err error) {
+			if strings.EqualFold(match[1], "on") {
+				opt.HttpSkipVerify = true
+				dbConfSet(db, "HttpSkipVerify", opt.HttpSkipVerify)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.HttpSkipVerify = false
+				dbConfSet(db, "HttpSkipVerify", opt.HttpSkipVerify)
+			} else {
+				opt.HttpSkipVerify = true
+			}
+
 			return
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?http-?proxy\z`), func() (err error) {
@@ -987,7 +1005,8 @@ func ParseArgs() (opt Option) {
 		return false
 	}
 
-	LB_ARG: for len(args) > 0 {
+LB_ARG:
+	for len(args) > 0 {
 		arg, _ := nextArg()
 
 		if arg == "--" {
@@ -1013,7 +1032,7 @@ func ParseArgs() (opt Option) {
 					continue LB_ARG
 				}
 			}
-			if ok := checkFILE(arg); ! ok {
+			if ok := checkFILE(arg); !ok {
 				fmt.Printf("Unknown option: %v\n", arg)
 				Help()
 			}
@@ -1042,7 +1061,6 @@ func ParseArgs() (opt Option) {
 			os.Remove(opt.ConfFile)
 		}
 	}
-
 
 	// prints
 	switch opt.Command {
@@ -1074,6 +1092,7 @@ func ParseArgs() (opt Option) {
 		fmt.Printf("Conf(ExtractChunks): %#v\n", opt.ExtractChunks)
 		fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
 	}
+	fmt.Printf("Conf(HttpSkipVerify): %#v\n", opt.HttpSkipVerify)
 
 	// check
 	switch opt.Command {
