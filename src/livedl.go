@@ -43,13 +43,17 @@ func main() {
 		}
 		baseDir = filepath.Dir(pa)
 	}
-	fmt.Printf("chdir: %s\n", baseDir)
-	if e := os.Chdir(baseDir); e != nil {
-		fmt.Println(e)
-		return
-	}
 
 	opt := options.ParseArgs()
+
+	// chdir if not disabled
+	if !opt.NoChdir {
+		fmt.Printf("chdir: %s\n", baseDir)
+		if e := os.Chdir(baseDir); e != nil {
+			fmt.Println(e)
+			return
+		}
+	}
 
 	// http
 	if opt.HttpRootCA != "" {

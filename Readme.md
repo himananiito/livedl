@@ -106,10 +106,33 @@ set-item env:CGO_ENABLED -value 1
 go build -o livedl.x86.exe src/livedl.go
 ```
 
-## 32bit環境で`x509: certificate signed by unknown authority`が出る
+### 32bit環境で`x509: certificate signed by unknown authority`が出る
 
 動けばいいのであればオプションで以下を指定する。
 
 `-http-skip-verify=on`
+
+## Dockerでビルド
+
+### livedlのソースを取得
+```
+git clone https://github.com/himananiito/livedl.git
+cd livedl
+git checkout master # Or another version that supports docker (contains Dockerfile)
+```
+
+### イメージ作成
+```
+docker build -t <your_image_tag> .
+```
+
+### イメージの使い方
+
+- 出力フォルダを/livedlにマウント
+- 通常のパラメーターに加えて`--no-chdir`を渡す
+
+```
+docker run -it --rm -v ~/livedl:/livedl <your_image_tag> livedl --no-chdir <other_parameters> ...
+```
 
 以上

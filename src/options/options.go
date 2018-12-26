@@ -59,6 +59,7 @@ type Option struct {
 	HttpRootCA             string
 	HttpSkipVerify         bool
 	HttpProxy              string
+	NoChdir                bool
 }
 
 func getCmd() (cmd string) {
@@ -93,10 +94,11 @@ COMMAND:
   -d2m     録画済みのdb(.sqlite3)をmp4に変換する(-db-to-mp4)
 
 オプション/option:
-  -h     ヘルプを表示
-  -vh    全てのオプションを表示
-  -v     バージョンを表示
-  --     後にオプションが無いことを指定
+  -h         ヘルプを表示
+  -vh        全てのオプションを表示
+  -v         バージョンを表示
+  -no-chdir  起動する時chdirしない
+  --         後にオプションが無いことを指定
 
 ニコニコ生放送録画用オプション:
   -nico-login <id>,<password>    (+) ニコニコのIDとパスワードを指定する
@@ -956,6 +958,10 @@ func ParseArgs() (opt Option) {
 				str = "http://" + str
 			}
 			opt.HttpProxy = str
+			return
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?no-?chdir\z`), func() (err error) {
+			opt.NoChdir = true
 			return
 		}},
 	}
