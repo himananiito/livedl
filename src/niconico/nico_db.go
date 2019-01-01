@@ -347,6 +347,10 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 			continue
 		}
 
+		if (vpos < 0) {
+			continue
+		}
+
 		line := fmt.Sprintf(
 			`<chat thread="%d" vpos="%d" date="%d" date_usec="%d" user_id="%s"`,
 			thread,

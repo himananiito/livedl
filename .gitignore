@@ -25,6 +25,7 @@
 
 *.db
 *.pem
+*.ass
 *.sqlite
 *.sqlite3
 *-journal
@@ -32,3 +33,4 @@
 *.sqlite3-wal
 
 !changelog.txt
+
