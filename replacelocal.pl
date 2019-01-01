@@ -3,7 +3,7 @@
 use strict;
 use v5.20;
 
-for my $file("livedl.exe", "livedl.x86.exe", "livedl-logger.exe") {
+for my $file("livedl2.exe") {
 	open my $f, "<:raw", $file or die;
 	undef $/;
 	my $s = <$f>;
@@ -16,7 +16,7 @@ for my $file("livedl.exe", "livedl.x86.exe", "livedl-logger.exe") {
 	while($s =~ m{(?<=\0)[^\0]{5,512}\.go(?=\0)|(?<=[[:cntrl:]])_/[A-Z]_/[^\0]{5,512}}g) {
 		my $s = $&;
 		if($s =~ m{\A(.*(?:/Users/.+?/go/src|/Go/src))(/.*)\z}s or
-		$s =~ m{\A(.*(?=/livedl/src/))(/.*)\z}s) {
+		$s =~ m{\A(.*(?=/livedl[^/]*/src/))(/.*)\z}s) {
 			my($all, $p, $f) = ($s, $1, $2);
 
 			my $p2 = $p;

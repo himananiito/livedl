@@ -1,0 +1,375 @@
+<html>
+<header>
+	<title>{{ .title }}</title>
+	<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO"
+	 crossorigin="anonymous">
+</header>
+
+<body>
+	<script src="https://code.jquery.com/jquery-3.3.1.min.js" integrity="sha256-FgpCb/KJQlLNfOu91ta32o/NMZxltwRo8QtmkMRdAu8="
+	 crossorigin="anonymous"></script>
+
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.6/umd/popper.min.js" integrity="sha384-wHAiFfRlMFy6i5SRaxvfOCifBUQy1xHdJ/yoi7FRNXMRBu5WHdZYu1hA6ZOblgut"
+	 crossorigin="anonymous"></script>
+	<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.2.1/js/bootstrap.min.js" integrity="sha384-B0UglyR+jN6CkvvICOB2joaf5I4l3gm9GU6Hc1og6Ls7i6U/mkkaduKaBhlAXv9k"
+	 crossorigin="anonymous"></script>
+
+	<div class="container">
+
+		<h1>
+			{{ .title }}
+		</h1>
+
+		<nav>
+			<div class="nav nav-tabs" id="nav-tab" role="tablist">
+				<a class="nav-item nav-link active" id="nav-home-tab" data-toggle="tab" href="#nav-home" role="tab" aria-controls="nav-home"
+				 aria-selected="true">メイン</a>
+				<a class="nav-item nav-link" id="nav-profile-tab" data-toggle="tab" href="#nav-profile" role="tab" aria-controls="nav-profile"
+				 aria-selected="false">ニコ生監視リスト</a>
+				<a class="nav-item nav-link" id="nav-contact-tab" data-toggle="tab" href="#nav-contact" role="tab" aria-controls="nav-contact"
+				 aria-selected="false">メモ</a>
+			</div>
+		</nav>
+
+		<!-- 各タブ -->
+		<div class="tab-content" id="nav-tabContent">
+			<div class="tab-pane fade show active" id="nav-home" role="tabpanel" aria-labelledby="nav-home-tab">
+				<h1>登録する</h1>
+				<form action="/register" method="post" id="register-form" autocomplete="off">
+
+					<div class="input-group mb-3">
+						<div class="input-group-prepend">
+
+							<!-- ターゲットの種類 -->
+							<button type="button" id="typeButton" class="btn btn-outline-secondary"></button>
+							<button type="button" class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split" data-toggle="dropdown"
+							 aria-haspopup="true" aria-expanded="false">
+								<span class="sr-only">Toggle Dropdown</span>
+							</button>
+							<div class="dropdown-menu">
+								<a class="dropdown-item" id="no-select" onclick="changeType(arguments[0])">指定なし</a>
+								<div role="separator" class="dropdown-divider"></div>
+								<a class="dropdown-item" id="type-cas-live" onclick="changeType(arguments[0])">ニコキャス<br>(Live)</a>
+								<a class="dropdown-item" id="type-archive" onclick="changeType(arguments[0])">ニコキャス<br>(アーカイブ)</a>
+								<a class="dropdown-item" id="type-archive-start" onclick="changeType(arguments[0])">ニコキャス<br>(アーカイブ)(開始時間指定)</a>
+							</div>
+							<input name="nicocasArchive" type="hidden">
+
+							<script>
+
+								function changeRegisterType(id) {
+									var arr = $("#" + id).html().split(/</);
+									$("#typeButton").text(arr[0]);
+
+									switch (id) {
+										case "type-archive":
+										case "type-archive-start":
+											$("[name=nicocasArchive]").val(1);
+											break;
+										default:
+											$("[name=nicocasArchive]").val(0);
+											break;
+									}
+
+									if (id == "type-archive-start") {
+										$('[name="archive-wait"]').show();
+										$("[name=startPosition]").show();
+									} else {
+										$('[name="archive-wait"]').hide();
+										$("[name=startPosition]").hide();
+									}
+								}
+
+								$(function () {
+									changeRegisterType("no-select");
+								});
+
+								function changeType(e) {
+									changeRegisterType(e.target.id);
+								}
+							</script>
+
+							<!-- アーカイブの倍速モード時のウェイト間隔 -->
+							<input name="archive-wait" type="number" step="0.1" class="form-control" value="2" style="width: 70px!important"
+							 title="負荷軽減のための待ち時間(秒)" readonly>
+
+							<!-- アーカイブの開始時間 -->
+							<input name="archive-position-en" type="hidden">
+							<input name="startPositionSec" type="hidden">
+							<input name="startPosition" type="time" step="1" class="form-control" title="指定した時間から録画をスタートする" value="00:00:00">
+						</div>
+
+						<!-- 入力欄 -->
+						<input name="target" type="text" class="form-control" id="registerTarget" title="録画対象のURL/変換対象のファイルのフルパス">
+
+						<!-- 開始ボタン -->
+						<div class="input-group-append">
+							<button class="btn btn-success" type="button submit">開始</button>
+						</div>
+					</div>
+
+				</form>
+
+				<script>
+					$('#register-form').submit(function () {
+						if ($("[name=startPosition]").is(":visible")) {
+							$("[name=archive-position-en]").val("1");
+
+							var a = new Date("2018-12-01T00:00:00");
+							var t = $("[name=startPosition]").val();
+							var b = new Date("2018-12-01T" + t);
+							var diff = (b - a) / 1000;
+							$("[name=startPositionSec]").val(diff);
+						}
+						return true;
+					})
+				</script>
+
+				<h1>止める</h1>
+
+				<table class="table">
+					{{if .working}}
+					<tr>
+						<th scope="col">放送ID</th>
+						<th scope="col">タイトル</th>
+						<th scope="col">配信者</th>
+						<th scope="col">進捗</th>
+						<th scope="col">停止</th>
+					</tr>
+					{{end}}
+
+					{{range $key, $worker := .workers}}
+
+					<tr>
+						<form action="/close" method="post">
+							<td><a href="http://live.nicovideo.jp/watch/{{$worker.GetID}}" target="_blank">{{$worker.GetID}}</td>
+							<td>{{$worker.GetTitle}}</td>
+							<td>{{$worker.GetName}}</td>
+							<td><span id="progress-{{$worker.GetWorkerID}}">{{$worker.GetProgress}}</span></td>
+
+							<td>
+								<div class="input-group">
+									<input name="target" value="{{$worker.GetWorkerID}}" type="hidden" class="form-control">
+									<button class="btn btn-danger" type="button submit">停止</button>
+								</div>
+							</td>
+						</form>
+					</tr>
+
+					{{end}}
+				</table>
+
+				{{if .working}}
+				<form action="/close" method="post">
+					<div class="input-group">
+						<input name="target" value="all" type="hidden">
+						<button class="btn btn-danger" type="button submit">全て停止</button>
+					</div>
+				</form>
+				{{end}}
+
+				<h1>変換リスト</h1>
+				<table>
+					<tr><th>パス</th><th>変換中？</th></tr>
+				{{range $k, $v := .converts}}
+					<tr><td>{{$k}}</td><td>{{$v}}</td></tr>
+				{{end}}
+				</table>
+				
+
+				<!-- drap drop -->
+
+				<script>
+					function refreshWorkers() {
+						$.ajax({
+							url: "/get-list",
+							dataType: "json",
+							success: function (data) {
+								data.result.forEach(o => {
+									var id = "progress-" + o.workerId;
+									var e = document.getElementById(id);
+									if (e) {
+										e.textContent = o.progress;
+									}
+								});
+								setTimeout(refreshWorkers, 2000);
+							}
+						});
+					}
+					$(function () {
+						setTimeout(refreshWorkers, 2000);
+					});
+				</script>
+
+				<script>
+					function dropHandler(e) {
+						e.stopPropagation();
+						e.preventDefault();
+						if (e.dataTransfer.items.length > 0) {
+							e.dataTransfer.items[0].getAsString(function (s) {
+								var elm = document.getElementById("registerTarget")
+								elm.value = s;
+							})
+						}
+					}
+
+					function dragOverHandler(e) {
+						e.stopPropagation();
+						e.preventDefault();
+						e.dataTransfer.dropEffect = 'copy';
+					}
+
+					document.body.addEventListener('dragover', dragOverHandler, false);
+					document.body.addEventListener('drop', dropHandler, false);
+				</script>
+			</div>
+
+			<div class="tab-pane fade" id="nav-profile" role="tabpanel" aria-labelledby="nav-profile-tab">
+
+				<span>登録したのに監視できていない放送があれば教えて下さい。</span><br/><br/>
+
+				<form action="/nico-finder" method="post" autocomplete="off">
+					<h3>コミュニティ</h3>
+					<div class="" id="nico-community-list"></div>
+					<button class="btn btn-info" type="button" onclick="appendNicoCommunity(); return false;">＋</button>
+
+					<h3>ユーザ</h3>
+					<div class="" id="nico-user-list"></div>
+					<button class="btn btn-info" type="button" onclick="appendNicoUser(); return false;">＋</button>
+
+					<h3>タイトルに含む文字列</h3>
+					<div class="" id="nico-title-list"></div>
+					<button class="btn btn-info" type="button" onclick="appendNicoTitle(); return false;">＋</button>
+
+					<script>
+						function appendNico(parent, name, value, placeholder) {
+							var inputGroup = $("<div></div>", {
+								class: "input-group col-sm-6"
+							});
+
+							var input = $("<input>", {
+								name: name,
+								type: "text",
+								class: "form-control",
+								placeholder: placeholder,
+								value: value
+							});
+
+							inputGroup.append(input);
+
+							/*
+							if(value && value.match(/^co\d+$/)) {
+								var append = $("<div></div>", {
+									class: "input-group-append"
+								});
+		
+								var img = $("<img>", {
+									src: "https://secure-dcdn.cdn.nimg.jp/comch/community-icon/128x128/" + value + ".jpg",
+									style: "width:30px; height:30px;"
+								});
+		
+								append.append(img);
+		
+								inputGroup.append(append);
+							}
+							*/
+
+							$(parent).append(inputGroup);
+						}
+						function appendNicoCommunity(comm) {
+							appendNico("#nico-community-list", "community[]", comm, "コミュニティ(co1234)");
+						}
+						function appendNicoUser(user) {
+							appendNico("#nico-user-list", "user[]", user, "ユーザー番号(1234)");
+						}
+						function appendNicoTitle(title) {
+							appendNico("#nico-title-list", "title[]", title, "タイトルに含む文字列");
+						}
+					</script>
+
+
+					{{range $var := .NicoCommunityList}}
+					<script>
+						appendNicoCommunity("{{$var}}");
+					</script>
+					{{end}}
+
+					{{range $var := .NicoUserList}}
+					<script>
+						appendNicoUser("{{$var}}");
+					</script>
+					{{end}}
+
+					{{range $var := .NicoTitleList}}
+					<script>
+						appendNicoTitle("{{$var}}")
+					</script>
+					{{end}}
+
+					<div class="offset-sm-2">
+						<button class="btn btn-success" type="button submit">登録</button>
+					</div>
+
+				</form>
+
+				<h4> 監視実行中？：{{.NicoFinderWorking}} </h4>
+
+			</div>
+
+			<div class="tab-pane fade" id="nav-contact" role="tabpanel" aria-labelledby="nav-contact-tab">
+
+				<pre style="white-space: pre-wrap">
+{{.limit}} まで起動可能
+
+新機能（①これまでと異なる録画方式及び②ニコ生の監視リスト及び③WebUI）を試してもらうだけの実験的なバージョンです。
+まだ旧バージョンの置き換えとしては使えません。
+
+☆できること
+- ニコ生のユーザの放送の録画
+- 指定した条件にマッチする放送の自動録画
+- 録画したデータのMPEG-2 TSへの変換
+
+自動起動時のデフォルトの録画方式は「ニコキャス(アーカイブ)(開始時間指定=00:00:00)」です。
+よって、ニコキャスアプリで見れない公式放送等には非対応です。
+この方式の場合、タイムシフトが有効でない場合は終了直前のいくつかのシーケンスが取得できないまま終了になることがあります。
+
+動画ファイルにする場合はsqlite3の絶対パスを登録欄に指定して下さい。
+
+DBから動画ファイル変換は現状だと単純な結合なので、ffmpegは不要です。
+セグメント抜けの場合は抜けの前後でファイルが分割されます。
+
+☆便利な操作方法
+- ブラウザのURL欄の文字列を画面にドラッグ＆ドロップして入力欄に指定できます。
+- sqlite3を指定するときはファイルをSHIFTキーを押しながら右クリックすると「パスのコピー」で絶対パスがコピーできます。
+
+固まる場合は
+http://localhost:8080/pprof/goroutine
+の内容を送ってほしいです。
+
+_____________________________________________________________________________
+- ffmpegのダウンロード先
+
+他の方法で入手したffmpegでの動作は保証しません。
+(ffmpeg ver.4以上であればおそらく動作可能)
+
+- win32
+https://ffmpeg.zeranoe.com/builds/win32/static/ffmpeg-latest-win32-static.zip
+
+- win64
+https://ffmpeg.zeranoe.com/builds/win64/static/ffmpeg-latest-win64-static.zip
+
+https://ffmpeg.zeranoe.com/builds/
+
+Version:      リリースバージョンかnightlyを選択
+Architecture: OSに合ったものを選択
+Linkng:       Staticを選択
+
+			</pre>
+			</div>
+		</div>
+
+	</div>
+
+</body>
+
+</html>

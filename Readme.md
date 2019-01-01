@@ -1,10 +1,28 @@
-# livedl
-新配信(HTML5)に対応したニコ生録画ツール。ニコ生以外のサイトにも対応予定
+# livedl2 αバージョン
+
+次期バージョンとなる予定のlivedl2の実験的機能評価用バージョンです。
 
 ## 使い方
-https://himananiito.hatenablog.jp/entry/livedl
-を参照
 
+`user-session.txt`にユーザーセッション情報（`user_session_XXXX_XXXXXX`）を書いて保存
+
+livedl2の実行ファイルを起動し、
+http://localhost:8080/
+にアクセスして下さい。
+
+### セッション情報の調べ方
+
+**セッション情報は「絶対に」他人に流出しないようにして下さい**
+
+例えばログイン済みのブラウザでニコ生トップページからデバッグコンソールを開き、以下のスクリプトを実行し、ブラウザ画面の文字列をコピーする。
+
+```
+var match = document.cookie.match(/user_session=(\w+)/); if(match) document.write(match[1]);
+```
+
+## ビルド方法
+
+以下の`lived.go`を`livedl2.go`に読み換えて下さい。
 
 ## Linux(Ubuntu)でのビルド方法
 ```
