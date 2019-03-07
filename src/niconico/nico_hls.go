@@ -613,7 +613,7 @@ func (hls *NicoHls) waitAllGoroutines() {
 
 func (hls *NicoHls) getwaybackkey(threadId string) (waybackkey string, neterr, err error) {
 
-	uri := fmt.Sprintf("http://live.nicovideo.jp/api/getwaybackkey?thread=%s", threadId)
+	uri := fmt.Sprintf("https://live.nicovideo.jp/api/getwaybackkey?thread=%s", threadId)
 	resp, err, neterr := httpbase.Get(uri, map[string]string{"Cookie": "user_session=" + hls.NicoSession})
 	if err != nil {
 		return
@@ -664,7 +664,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 			conn, _, err := websocket.DefaultDialer.Dial(
 				messageServerUri,
 				map[string][]string{
-					"Origin": []string{"http://live2.nicovideo.jp"},
+					"Origin": []string{"https://live2.nicovideo.jp"},
 					"Sec-WebSocket-Protocol": []string{"msg.nicovideo.jp#json"},
 					"User-Agent": []string{httpbase.GetUserAgent()},
 				},
@@ -1738,7 +1738,7 @@ func (hls *NicoHls) startMain() {
 					return ERROR_SHUTDOWN
 				}
 
-				// http://nicolive.cdn.nimg.jp/relive/front_assets/scripts/nicolib.4bb8b62b35.js
+				// https://nicolive.cdn.nimg.jp/relive/front_assets/scripts/nicolib.4bb8b62b35.js
 				switch code {
 				case "INVALID_STREAM_QUALITY":
 					// webSocket自体を再接続しないと、コメントサーバが取得できない
@@ -1913,9 +1913,9 @@ func postTsRsv1(opt options.Option) (err error) {
 func postTsRsvBase(num int, vid, session string) (err error) {
 	var uri string
 	if num == 0 {
-		uri = fmt.Sprintf("http://live.nicovideo.jp/api/watchingreservation?mode=watch_num&vid=%s", vid)
+		uri = fmt.Sprintf("https://live.nicovideo.jp/api/watchingreservation?mode=watch_num&vid=%s", vid)
 	} else {
-		uri = fmt.Sprintf("http://live.nicovideo.jp/api/watchingreservation?mode=confirm_watch_my&vid=%s", vid)
+		uri = fmt.Sprintf("https://live.nicovideo.jp/api/watchingreservation?mode=confirm_watch_my&vid=%s", vid)
 	}
 
 	header := map[string]string{
@@ -1946,8 +1946,8 @@ func postTsRsvBase(num int, vid, session string) (err error) {
 	}
 
 	// "X-Requested-With": "XMLHttpRequest",
-	// "Origin": "http://live.nicovideo.jp",
-	// "Referer": fmt.Sprintf("http://live.nicovideo.jp/gate/%s", opt.NicoLiveId),
+	// "Origin": "https://live.nicovideo.jp",
+	// "Referer": fmt.Sprintf("https://live.nicovideo.jp/gate/%s", opt.NicoLiveId),
 	// "X-Prototype-Version": "1.6.0.3",
 
 	var vals url.Values
@@ -1971,7 +1971,7 @@ func postTsRsvBase(num int, vid, session string) (err error) {
 		}
 	}
 
-	dat1, _, _, err, neterr := postStringHeader("http://live.nicovideo.jp/api/watchingreservation", header, vals)
+	dat1, _, _, err, neterr := postStringHeader("https://live.nicovideo.jp/api/watchingreservation", header, vals)
 	if err != nil || neterr != nil {
 		if err == nil {
 			err = neterr
@@ -1994,7 +1994,7 @@ func getProps(opt options.Option) (props interface{}, isFlash, notLogin, tsRsv0,
 		header["Cookie"] = "user_session=" + opt.NicoSession
 	}
 
-	uri := fmt.Sprintf("http://live2.nicovideo.jp/watch/%s", opt.NicoLiveId)
+	uri := fmt.Sprintf("https://live2.nicovideo.jp/watch/%s", opt.NicoLiveId)
 	dat, _, _, err, neterr := getStringHeader(uri, header)
 	if err != nil || neterr != nil {
 		if err == nil {
@@ -2095,7 +2095,7 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin, reserved bool,
 	proplist := map[string][]string{
 		// "broadcaster" // nicocas
 		"cas-userName": []string{"broadcaster", "nickname"}, // ユーザ名
-		"cas-userPageUrl": []string{"broadcaster", "pageUrl"}, // "http://www.nicovideo.jp/user/\d+"
+		"cas-userPageUrl": []string{"broadcaster", "pageUrl"}, // "https://www.nicovideo.jp/user/\d+"
 		// "community"
 		"comId": []string{"community", "id"}, // "co\d+"
 		// "program"
@@ -2111,7 +2111,7 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin, reserved bool,
 		"providerType": []string{"program", "providerType"}, // "community"
 		"status": []string{"program", "status"}, //
 		"userName": []string{"program", "supplier", "name"}, // ユーザ名
-		"userPageUrl": []string{"program", "supplier", "pageUrl"}, // "http://www.nicovideo.jp/user/\d+"
+		"userPageUrl": []string{"program", "supplier", "pageUrl"}, // "https://www.nicovideo.jp/user/\d+"
 		"title": []string{"program", "title"}, // title
 		// "site"
 		"nicocas": []string{"site", "nicocas"}, //
