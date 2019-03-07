@@ -141,7 +141,7 @@ func TestRun(opt options.Option) (err error) {
 		}
 
 
-		resp, e, nete := httpbase.Get("http://live.nicovideo.jp/api/getalertinfo", nil)
+		resp, e, nete := httpbase.Get("https://live.nicovideo.jp/api/getalertinfo", nil)
 		if e != nil {
 			err = e
 			return
