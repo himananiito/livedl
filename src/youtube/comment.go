@@ -117,7 +117,17 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 					if (! ok) {
 						continue
 					}
-					message, _ := objs.FindString(liveChatMessageRenderer, "message", "simpleText")
+					message, ok := objs.FindString(liveChatMessageRenderer, "message", "simpleText")
+					if (! ok) {
+						message = ""
+						if runs, ok := objs.FindArray(liveChatMessageRenderer, "message", "runs"); ok {
+							//objs.PrintAsJson(runs)
+							for _, r := range runs {
+								mm , _ := objs.FindString(r, "text")
+								message += mm;
+							}
+						}
+					}
 					timestampUsec, ok := objs.FindString(liveChatMessageRenderer, "timestampUsec")
 					if (! ok) {
 						continue
