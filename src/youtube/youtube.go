@@ -126,13 +126,22 @@ func getInfo(buff []byte) (title, ucid, author string, err error) {
 
 	//objs.PrintAsJson(data); return
 
-	title, ok := objs.FindString(data, "args", "title")
+	var player_response interface{}
+	err = json.Unmarshal([]byte(data.(map[string]interface{})["args"].(map[string]interface{})["player_response"].(string)), &player_response)
+	if err != nil {
+		err = fmt.Errorf("player_response parse error")
+		return
+	}
+
+	//objs.PrintAsJson(player_response); return
+
+	title, ok := objs.FindString(player_response, "videoDetails", "title")
 	if (! ok) {
 		err = fmt.Errorf("title not found")
 		return
 	}
 	ucid, _ = objs.FindString(data, "args", "ucid")
-	author, _ = objs.FindString(data, "args", "author")
+	author, _ = objs.FindString(player_response, "videoDetails", "author")
 	return
 }
 
