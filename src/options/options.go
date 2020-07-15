@@ -1100,6 +1100,10 @@ LB_ARG:
 	}
 	fmt.Printf("Conf(HttpSkipVerify): %#v\n", opt.HttpSkipVerify)
 
+	if opt.NicoDebug {
+		fmt.Printf("Conf(NicoDebug): %#v\n", opt.NicoDebug)
+	}
+
 	// check
 	switch opt.Command {
 	case "":
