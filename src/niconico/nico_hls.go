@@ -2,110 +2,121 @@ package niconico
 
 import (
 	"fmt"
-	"net/http"
-	"net/url"
-	"time"
-	"regexp"
+
+	"encoding/json"
 	"html"
 	"io/ioutil"
+	"net/http"
+	"net/url"
+	"regexp"
+	"time"
 
 	"os"
-	"strconv"
-	"encoding/json"
-	"github.com/gorilla/websocket"
-	"../options"
-	"../files"
-	"../objs"
 	"os/signal"
 	"sync"
+
+	"github.com/gorilla/websocket"
+
+	"strconv"
 	"strings"
-	"syscall"
+
 	"log"
 	"runtime"
+	"syscall"
+
+	"../files"
+	"../objs"
+	"../options"
 
 	"database/sql"
+
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/sha3"
 
-	_ "net/http/pprof"
-	"../httpbase"
-	"github.com/gin-gonic/gin"
 	"context"
 	"math"
+	_ "net/http/pprof"
+
+	"../httpbase"
+	"github.com/gin-gonic/gin"
+
 	"../gorman"
 )
 
 type OBJ = map[string]interface{}
 
 type playlist struct {
-	uri *url.URL
-	uriMaster *url.URL
+	uri                *url.URL
+	uriMaster          *url.URL
 	uriTimeshiftMaster *url.URL
-	bandwidth int
-	nextTime time.Time
-	format string
-	withoutFormat bool
-	seqNo int
-	position float64
+	bandwidth          int
+	nextTime           time.Time
+	format             string
+	withoutFormat      bool
+	seqNo              int
+	position           float64
 }
 type NicoHls struct {
+	wsapi int
+
 	startDelay int
-	playlist playlist
+	playlist   playlist
 
-	broadcastId string
+	broadcastId  string
 	webSocketUrl string
-	myUserId string
+	myUserId     string
 
-	commentStarted bool
+	commentStarted    bool
 	mtxCommentStarted sync.Mutex
 
-	chInterrupt chan os.Signal
-	nInterrupt int
+	chInterrupt  chan os.Signal
+	nInterrupt   int
 	mtxInterrupt sync.Mutex
 
-	mtxRestart sync.Mutex
+	mtxRestart  sync.Mutex
 	restartMain bool
-	quality string
+	quality     string
 
-	errNumChunk int
+	errNumChunk   int
 	errRestartCnt int
 
-	dbName string
-	db *sql.DB
-	dbMtx sync.Mutex
+	dbName     string
+	db         *sql.DB
+	dbMtx      sync.Mutex
 	lastCommit time.Time
 
-	isTimeshift bool
-	timeshiftStart float64
-	fastTimeshift bool
+	isTimeshift        bool
+	timeshiftStart     float64
+	fastTimeshift      bool
 	ultrafastTimeshift bool
 
-	fastTimeshiftOrig bool
+	fastTimeshiftOrig      bool
 	ultrafastTimeshiftOrig bool
 
-	finish bool
+	finish      bool
 	commentDone bool
 
 	NicoSession string
-	limitBw int
+	limitBw     int
 	limitBwOrig int
 
-	nicoDebug bool
+	nicoDebug     bool
 	msgErrorCount int
 	msgErrorSeqNo int
-	memdb *sql.DB
-	memdbMtx sync.Mutex
-	seqNo500 int
-	cnt500 int
-	bw500 int
+	memdb         *sql.DB
+	memdbMtx      sync.Mutex
+	seqNo500      int
+	cnt500        int
+	bw500         int
 
 	mtxWg sync.Mutex
 
 	gmPlst *gorman.GoroutineManager
 	gmCmnt *gorman.GoroutineManager
-	gmDB *gorman.GoroutineManager
+	gmDB   *gorman.GoroutineManager
 	gmMain *gorman.GoroutineManager
 }
+
 func debug_Now() string {
 	return time.Now().Format("2006/01/02-15:04:05")
 }
@@ -123,6 +134,12 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		return
 	}
 
+	wsapi := 2
+	if m := regexp.MustCompile(`/wsapi/v1/`).FindStringSubmatch(webSocketUrl); len(m) > 0 {
+		wsapi = 1
+		log.Println("wsapi: 1")
+	}
+
 	myUserId, _ := prop["//myId"].(string)
 	if myUserId == "" {
 		myUserId = "NaN"
@@ -133,7 +150,14 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		timeshift = true
 	}
 
-
+	if wsapi == 2 && false && !timeshift {
+		if m := regexp.MustCompile(`/watch/([^?]+)`).FindStringSubmatch(webSocketUrl); len(m) > 0 {
+			broadcastId = m[1]
+		}
+		webSocketUrl = strings.Replace(webSocketUrl, "/wsapi/v2/", "/wsapi/v1/", 1)
+		wsapi = 1
+		log.Println("wsapi: 1")
+	}
 
 	var pid string
 	if nicoliveProgramId, ok := prop["nicoliveProgramId"]; ok {
@@ -141,9 +165,9 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 	}
 
 	var uname string // ユーザ名
-	var uid string // ユーザID
+	var uid string   // ユーザID
 	var cname string // コミュ名 or チャンネル名
-	var cid string // コミュID or チャンネルID
+	var cid string   // コミュID or チャンネルID
 
 	var pt string
 	if providerType, ok := prop["providerType"]; ok {
@@ -233,7 +257,6 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 	dbName = strings.Replace(dbName, "?TIME6?", sTime6, -1)
 	dbName = strings.Replace(dbName, "?TIME4?", sTime4, -1)
 
-
 	if timeshift {
 		dbName = dbName + "(TS)"
 	}
@@ -242,37 +265,39 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 	files.MkdirByFileName(dbName)
 
 	hls = &NicoHls{
-		broadcastId: broadcastId,
+		wsapi: wsapi,
+
+		broadcastId:  broadcastId,
 		webSocketUrl: webSocketUrl,
-		myUserId: myUserId,
+		myUserId:     myUserId,
 
 		quality: "abr",
-		dbName: dbName,
+		dbName:  dbName,
 
-		isTimeshift: timeshift,
-		fastTimeshift: opt.NicoFastTs || opt.NicoUltraFastTs,
+		isTimeshift:        timeshift,
+		fastTimeshift:      opt.NicoFastTs || opt.NicoUltraFastTs,
 		ultrafastTimeshift: opt.NicoUltraFastTs,
 
 		NicoSession: opt.NicoSession,
-		limitBw: opt.NicoLimitBw,
+		limitBw:     opt.NicoLimitBw,
 		limitBwOrig: opt.NicoLimitBw,
-		nicoDebug: opt.NicoDebug,
+		nicoDebug:   opt.NicoDebug,
 
-		gmPlst: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
-		gmCmnt: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
-		gmDB: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
-		gmMain: gorman.WithChecker(func(c int) {hls.checkReturnCode(c)}),
+		gmPlst: gorman.WithChecker(func(c int) { hls.checkReturnCode(c) }),
+		gmCmnt: gorman.WithChecker(func(c int) { hls.checkReturnCode(c) }),
+		gmDB:   gorman.WithChecker(func(c int) { hls.checkReturnCode(c) }),
+		gmMain: gorman.WithChecker(func(c int) { hls.checkReturnCode(c) }),
 
-	timeshiftStart: opt.NicoTsStart,
-}
+		timeshiftStart: opt.NicoTsStart,
+	}
 
 	hls.fastTimeshiftOrig = hls.fastTimeshift
 	hls.ultrafastTimeshiftOrig = hls.ultrafastTimeshift
 
-	for i := 0; i < 2 ; i++ {
+	for i := 0; i < 2; i++ {
 		err := hls.dbOpen()
 		if err != nil {
-			if (! strings.Contains(err.Error(), "able to open")) {
+			if !strings.Contains(err.Error(), "able to open") {
 				log.Fatalln(err)
 			}
 		} else if _, err := os.Stat(hls.dbName); err == nil {
@@ -291,7 +316,7 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 	// 放送情報をdbに入れる。自身のユーザ情報は入れない
 	// dbに入れたくないデータはキーの先頭を//としている
 	for k, v := range prop {
-		if (! strings.HasPrefix(k, "//")) {
+		if !strings.HasPrefix(k, "//") {
 			hls.dbKVSet(k, v)
 		}
 	}
@@ -340,21 +365,21 @@ func (hls *NicoHls) commentHandler(tag string, attr interface{}) (err error) {
 		hash := fmt.Sprintf("%x", sha3.Sum256([]byte(calc_s)))
 
 		hls.dbInsert("comment", map[string]interface{}{
-			"vpos": attrMap["vpos"],
-			"date": attrMap["date"],
+			"vpos":      attrMap["vpos"],
+			"date":      attrMap["date"],
 			"date_usec": attrMap["date_usec"],
-			"date2": date2,
-			"no": attrMap["no"],
+			"date2":     date2,
+			"no":        attrMap["no"],
 			"anonymity": attrMap["anonymity"],
-			"user_id": attrMap["user_id"],
-			"content": attrMap["content"],
-			"mail": attrMap["mail"],
-			"premium": attrMap["premium"],
-			"score": attrMap["score"],
-			"thread": attrMap["thread"],
-			"origin": attrMap["origin"],
-			"locale": attrMap["locale"],
-			"hash": hash,
+			"user_id":   attrMap["user_id"],
+			"content":   attrMap["content"],
+			"mail":      attrMap["mail"],
+			"premium":   attrMap["premium"],
+			"score":     attrMap["score"],
+			"thread":    attrMap["thread"],
+			"origin":    attrMap["origin"],
+			"locale":    attrMap["locale"],
+			"hash":      hash,
 		})
 	} else {
 		if _, ok := attrMap["thread"].(float64); ok {
@@ -457,7 +482,7 @@ func (hls *NicoHls) markRestartMain(delay int) {
 	hls.mtxRestart.Lock()
 	defer hls.mtxRestart.Unlock()
 
-	if (! hls.restartMain) && (! hls.finish) {
+	if (!hls.restartMain) && (!hls.finish) {
 		hls.startDelay = delay
 		hls.restartMain = true
 	}
@@ -485,7 +510,7 @@ func (hls *NicoHls) checkReturnCode(code int) {
 		// 番組終了時、websocketでEND_PROGRAMが来るよりも先にこうなるが、
 		// END_PROGRAMを受信するにはwebsocketの再接続が必要
 		//log.Println("403")
-		if (! hls.interrupted()) {
+		if !hls.interrupted() {
 			hls.markRestartMain(0)
 		}
 		hls.stopPGoroutines()
@@ -496,7 +521,7 @@ func (hls *NicoHls) checkReturnCode(code int) {
 		if hls.isTimeshift {
 			if hls.commentDone {
 				hls.stopPCGoroutines()
-			} else if (! hls.getCommentStarted()) {
+			} else if !hls.getCommentStarted() {
 				hls.stopPCGoroutines()
 			} else {
 				fmt.Println("waiting comment")
@@ -549,22 +574,25 @@ func (hls *NicoHls) checkReturnCode(code int) {
 
 // Of playlist
 func (hls *NicoHls) startPGoroutine(f func(<-chan struct{}) int) {
-	if (! hls.interrupted()) {
+	if !hls.interrupted() {
 		hls.gmPlst.Go(f)
 	}
 }
+
 // Of comment
 func (hls *NicoHls) startCGoroutine(f func(<-chan struct{}) int) {
-	if (! hls.interrupted()) {
+	if !hls.interrupted() {
 		hls.gmCmnt.Go(f)
 	}
 }
+
 // Of DB
 func (hls *NicoHls) startDBGoroutine(f func(<-chan struct{}) int) {
-	if (! hls.interrupted()) {
+	if !hls.interrupted() {
 		hls.gmDB.Go(f)
 	}
 }
+
 // Of main
 func (hls *NicoHls) startMGoroutine(f func(<-chan struct{}) int) {
 	hls.gmMain.Go(f)
@@ -574,7 +602,7 @@ func (hls *NicoHls) waitRestartMain() bool {
 	pc, _, _, ok := runtime.Caller(1)
 	if ok {
 		fn := runtime.FuncForPC(pc)
-		if (! strings.HasSuffix(fn.Name(), ".Wait")) {
+		if !strings.HasSuffix(fn.Name(), ".Wait") {
 			log.Printf("[FIXME] Don't call waitRestartMain from %s\n", fn.Name())
 		}
 	}
@@ -650,11 +678,11 @@ func (hls *NicoHls) getCommentStarted() bool {
 	return hls.commentStarted
 }
 func (hls *NicoHls) startComment(messageServerUri, threadId string) {
-	if (! hls.getCommentStarted()) && (! hls.commentDone) {
+	if (!hls.getCommentStarted()) && (!hls.commentDone) {
 		hls.setCommentStarted(true)
 
 		hls.startCGoroutine(func(sig <-chan struct{}) int {
-			defer func(){
+			defer func() {
 				hls.setCommentStarted(false)
 			}()
 
@@ -664,13 +692,13 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 			conn, _, err := websocket.DefaultDialer.Dial(
 				messageServerUri,
 				map[string][]string{
-					"Origin": []string{"http://live2.nicovideo.jp"},
+					"Origin":                 []string{"http://live2.nicovideo.jp"},
 					"Sec-WebSocket-Protocol": []string{"msg.nicovideo.jp#json"},
-					"User-Agent": []string{httpbase.GetUserAgent()},
+					"User-Agent":             []string{httpbase.GetUserAgent()},
 				},
 			)
 			if err != nil {
-				if (! hls.interrupted()) {
+				if !hls.interrupted() {
 					log.Println("comment connect:", err)
 				}
 				return COMMENT_WS_ERROR
@@ -691,21 +719,21 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 			})
 
 			hls.startCGoroutine(func(sig <-chan struct{}) int {
-				for (! hls.interrupted()) {
+				for !hls.interrupted() {
 					select {
-						case <-time.After(60 * time.Second):
-							if conn != nil {
-								if err := writeJson(""); err != nil {
-									if (! hls.interrupted()) {
-										log.Println("comment send null:", err)
-									}
-									return COMMENT_WS_ERROR
+					case <-time.After(60 * time.Second):
+						if conn != nil {
+							if err := writeJson(""); err != nil {
+								if !hls.interrupted() {
+									log.Println("comment send null:", err)
 								}
-							} else {
-								return OK
+								return COMMENT_WS_ERROR
 							}
-						case <-sig:
-							return GOT_SIGNAL
+						} else {
+							return OK
+						}
+					case <-sig:
+						return GOT_SIGNAL
 					}
 				}
 				return OK
@@ -733,61 +761,61 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 
 					var pre int64
 					var finishHint int
-					for (! hls.interrupted()) {
+					for !hls.interrupted() {
 						select {
-							case <-time.After(1 * time.Second):
-								c := getChatCount()
-								if c == 0 || c == pre {
+						case <-time.After(1 * time.Second):
+							c := getChatCount()
+							if c == 0 || c == pre {
 
-									waybackkey, neterr, err := hls.getwaybackkey(threadId)
-									if neterr != nil {
-										return NETWORK_ERROR
-									}
-									if err != nil {
-										log.Printf("getwaybackkey: %v\n", err)
-										return COMMENT_DONE
-									}
-
-									_, when := hls.getTsCommentFromWhen()
-
-									//fmt.Printf("getTsCommentFromWhen %f %d\n", when, res_from)
-
-									err = writeJson([]OBJ{
-										OBJ{"ping": OBJ{"content": "rs:1"}},
-										OBJ{"ping": OBJ{"content": "ps:5"}},
-										OBJ{"thread": OBJ{
-											"fork": 0,
-											"nicoru": 0,
-											"res_from": -1000,
-											"scores": 1,
-											"thread": threadId,
-											"user_id": hls.myUserId,
-											"version": "20061206",
-											"waybackkey": waybackkey,
-											"when": when + 1,
-											"with_global": 1,
-										}},
-										OBJ{"ping": OBJ{"content": "pf:5"}},
-										OBJ{"ping": OBJ{"content": "rf:1"}},
-									})
-									if err != nil {
-										return NETWORK_ERROR
-									}
-
-								} else if c < pre + 100 {
-									// 通常,1000カウント弱増えるが、少ししか増えない場合
-									finishHint++
-									if finishHint > 2 {
-										return COMMENT_DONE
-									}
-
-								} else {
-									finishHint = 0
+								waybackkey, neterr, err := hls.getwaybackkey(threadId)
+								if neterr != nil {
+									return NETWORK_ERROR
 								}
-								pre = c
+								if err != nil {
+									log.Printf("getwaybackkey: %v\n", err)
+									return COMMENT_DONE
+								}
 
-							case <-sig:
-								return GOT_SIGNAL
+								_, when := hls.getTsCommentFromWhen()
+
+								//fmt.Printf("getTsCommentFromWhen %f %d\n", when, res_from)
+
+								err = writeJson([]OBJ{
+									OBJ{"ping": OBJ{"content": "rs:1"}},
+									OBJ{"ping": OBJ{"content": "ps:5"}},
+									OBJ{"thread": OBJ{
+										"fork":        0,
+										"nicoru":      0,
+										"res_from":    -1000,
+										"scores":      1,
+										"thread":      threadId,
+										"user_id":     hls.myUserId,
+										"version":     "20061206",
+										"waybackkey":  waybackkey,
+										"when":        when + 1,
+										"with_global": 1,
+									}},
+									OBJ{"ping": OBJ{"content": "pf:5"}},
+									OBJ{"ping": OBJ{"content": "rf:1"}},
+								})
+								if err != nil {
+									return NETWORK_ERROR
+								}
+
+							} else if c < pre+100 {
+								// 通常,1000カウント弱増えるが、少ししか増えない場合
+								finishHint++
+								if finishHint > 2 {
+									return COMMENT_DONE
+								}
+
+							} else {
+								finishHint = 0
+							}
+							pre = c
+
+						case <-sig:
+							return GOT_SIGNAL
 						}
 					}
 					return COMMENT_DONE
@@ -798,27 +826,27 @@ func (hls *NicoHls) startComment(messageServerUri, threadId string) {
 					OBJ{"ping": OBJ{"content": "rs:0"}},
 					OBJ{"ping": OBJ{"content": "ps:0"}},
 					OBJ{"thread": OBJ{
-						"fork": 0,
-						"nicoru": 0,
-						"res_from": -1000,
-						"scores": 1,
-						"thread": threadId,
-						"user_id": hls.myUserId,
-						"version": "20061206",
+						"fork":        0,
+						"nicoru":      0,
+						"res_from":    -1000,
+						"scores":      1,
+						"thread":      threadId,
+						"user_id":     hls.myUserId,
+						"version":     "20061206",
 						"with_global": 1,
 					}},
 					OBJ{"ping": OBJ{"content": "pf:0"}},
 					OBJ{"ping": OBJ{"content": "rf:0"}},
 				})
 				if err != nil {
-					if (! hls.interrupted()) {
+					if !hls.interrupted() {
 						log.Println("comment send first:", err)
 					}
 					return COMMENT_WS_ERROR
 				}
 			}
 
-			for (! hls.interrupted()) {
+			for !hls.interrupted() {
 				select {
 				case <-sig:
 					return GOT_SIGNAL
@@ -978,8 +1006,8 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404, is500 bool, 
 		return
 	case 404:
 		data := map[string]interface{}{
-			"seqno": seqno,
-			"current": hls.playlist.seqNo,
+			"seqno":    seqno,
+			"current":  hls.playlist.seqNo,
 			"notfound": 1,
 		}
 		if hls.nicoDebug {
@@ -1000,11 +1028,11 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404, is500 bool, 
 	}
 
 	data := map[string]interface{}{
-		"seqno": seqno,
-		"current": hls.playlist.seqNo,
-		"size": len(buff),
+		"seqno":     seqno,
+		"current":   hls.playlist.seqNo,
+		"size":      len(buff),
 		"bandwidth": hls.playlist.bandwidth,
-		"data": buff,
+		"data":      buff,
 	}
 
 	if seqno == hls.playlist.seqNo {
@@ -1054,7 +1082,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 							return
 						} else {
 							hls.bw500 = hls.playlist.bandwidth
-							fmt.Printf("Changing limitBw: %v -> %v\n", hls.limitBw, hls.playlist.bandwidth - 1)
+							fmt.Printf("Changing limitBw: %v -> %v\n", hls.limitBw, hls.playlist.bandwidth-1)
 							hls.limitBw = hls.playlist.bandwidth - 1
 						}
 					}
@@ -1113,7 +1141,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 		var streamDuration float64
 		if hls.isTimeshift {
 			if ma := regexp.MustCompile(`#(?:DMC-)?STREAM-DURATION:([\+\-]?\d+(?:\.\d+)?(?:[eE][\+\-]?\d+)?)`).
-			FindStringSubmatch(m3u8); len(ma) > 0 {
+				FindStringSubmatch(m3u8); len(ma) > 0 {
 				n, e := strconv.ParseFloat(ma[1], 64)
 				if e != nil {
 					err = e
@@ -1142,7 +1170,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 
 		type seq_t struct {
 			seqno int
-			uri string
+			uri   string
 		}
 		var seqlist []seq_t
 
@@ -1185,11 +1213,11 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 
 			seqlist = append(seqlist, seq_t{
 				seqno: seqno,
-				uri: uri.String(),
+				uri:   uri.String(),
 			})
 
 			// メディアのURLがシーケンス番号の部分だけが変わる形式かどうか
-			if (! hls.isTimeshift) && (! hls.playlist.withoutFormat) {
+			if (!hls.isTimeshift) && (!hls.playlist.withoutFormat) {
 				f := strings.Replace(
 					strings.Replace(uri.String(), "%", "%%", -1),
 					fmt.Sprintf("%d.ts?", seqno),
@@ -1211,7 +1239,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 		if hls.isTimeshift {
 			hls.timeshiftStart = currentPos + duration - 0.49
 
-			if (! hls.ultrafastTimeshift) {
+			if !hls.ultrafastTimeshift {
 				td := duration * float64(time.Second) / 6
 				hls.playlist.nextTime = time.Now().Add(time.Duration(td))
 			}
@@ -1222,9 +1250,9 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 			sec := int(hls.playlist.position)
 			var pos string
 			if sec >= 3600 {
-				pos += fmt.Sprintf("%02d:%02d:%02d", sec / 3600, (sec % 3600) / 60, sec % 60)
+				pos += fmt.Sprintf("%02d:%02d:%02d", sec/3600, (sec%3600)/60, sec%60)
 			} else {
-				pos += fmt.Sprintf("%02d:%02d", sec / 60, sec % 60)
+				pos += fmt.Sprintf("%02d:%02d", sec/60, sec%60)
 			}
 			fmt.Printf("Current SeqNo: %d, Pos: %s\n", hls.playlist.seqNo, pos)
 
@@ -1234,7 +1262,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 
 		minSeq := math.MaxInt32
 		maxSeq := -1
-		if (! hls.isTimeshift) && (! hls.playlist.withoutFormat) {
+		if (!hls.isTimeshift) && (!hls.playlist.withoutFormat) {
 			// 404になるまで後ろに戻ってチャンクを取得する
 			if hls.nicoDebug {
 				fmt.Fprintf(os.Stderr, "%s:start chunks(back)\n", debug_Now())
@@ -1274,8 +1302,8 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 
 		// 一時的に倍速モードを切っているかもしれないので戻す
 		if hls.isTimeshift && (0 < hls.playlist.seqNo && hls.playlist.seqNo < 10) {
-				hls.fastTimeshift = hls.fastTimeshiftOrig
-				hls.ultrafastTimeshift = hls.ultrafastTimeshiftOrig
+			hls.fastTimeshift = hls.fastTimeshiftOrig
+			hls.ultrafastTimeshift = hls.ultrafastTimeshiftOrig
 		}
 
 		var found404 bool
@@ -1315,13 +1343,13 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 			if seq.seqno < minSeq {
 				minSeq = seq.seqno
 			}
-			if (! found404) {
+			if !found404 {
 				maxSeq = seq.seqno
 			}
 		}
 
 		if minSeq != math.MaxInt32 && maxSeq > 0 {
-			for i := minSeq; i <= maxSeq ; i++ {
+			for i := minSeq; i <= maxSeq; i++ {
 				hls.memdbSetStopBack(i)
 			}
 			hls.memdbDelete(hls.playlist.seqNo)
@@ -1339,7 +1367,6 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 				return
 			}
 		}
-
 
 	} else {
 		// Master m3u8
@@ -1371,7 +1398,7 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 					if hls.limitBw < maxBw && bw < maxBw {
 						set()
 
-					// 現在値が制限以下で、制限を超えないかつ現在値より大きければセット。
+						// 現在値が制限以下で、制限を超えないかつ現在値より大きければセット。
 					} else if maxBw <= hls.limitBw && bw <= hls.limitBw && maxBw < bw {
 						set()
 					}
@@ -1420,7 +1447,7 @@ func (hls *NicoHls) startPlaylist(uri string) {
 		}
 
 		if hls.isTimeshift {
-			if (hls.timeshiftStart == 0) {
+			if hls.timeshiftStart == 0 {
 				hls.timeshiftStart = hls.dbGetLastPosition()
 			}
 			u := hls.playlist.uriTimeshiftMaster.String()
@@ -1430,15 +1457,14 @@ func (hls *NicoHls) startPlaylist(uri string) {
 			hls.playlist.uri = uri
 		}
 
-		for (! hls.interrupted()) {
+		for !hls.interrupted() {
 			var dur time.Duration
-			if (hls.playlist.nextTime.IsZero()) {
+			if hls.playlist.nextTime.IsZero() {
 				dur = 0
 			} else {
 				now := time.Now()
 				dur = hls.playlist.nextTime.Sub(now)
 			}
-
 
 			// 181002
 			if dur < time.Second {
@@ -1465,19 +1491,19 @@ func (hls *NicoHls) startPlaylist(uri string) {
 
 				is403, isEnd, is500, neterr, err := hls.getPlaylist(uri)
 				if neterr != nil {
-					if (! hls.interrupted()) {
+					if !hls.interrupted() {
 						log.Println("playlist:", e)
 					}
 					return NETWORK_ERROR
 				}
 				if is500 {
-					if (! hls.interrupted()) {
+					if !hls.interrupted() {
 						log.Println("playlist(500):", e)
 					}
 					return NETWORK_ERROR
 				}
 				if err != nil {
-					if (! hls.interrupted()) {
+					if !hls.interrupted() {
 						log.Println("playlist:", e)
 					}
 					return PLAYLIST_ERROR
@@ -1497,6 +1523,10 @@ func (hls *NicoHls) startPlaylist(uri string) {
 	})
 }
 func (hls *NicoHls) startMain() {
+	if hls.wsapi == 1 {
+		hls.startMainV1()
+		return
+	}
 
 	// エラー時はMAIN_*を返すこと
 	hls.startPGoroutine(func(sig <-chan struct{}) int {
@@ -1552,43 +1582,22 @@ func (hls *NicoHls) startMain() {
 		})
 
 		err = writeJson(OBJ{
-			"type": "watch",
-			"body": OBJ{
-				"command": "playerversion",
-				"params": []string{
-					"leo",
+			"type": "startWatching",
+			"data": OBJ{
+				"stream": OBJ{
+					"quality":  hls.quality, //"abr", // high
+					"protocol": "hls",
+					"latency":  "high",
 				},
+				"room": OBJ{
+					"protocol":    "webSocket",
+					"commentable": true,
+				},
+				"reconnect": true,
 			},
 		})
 		if err != nil {
-			if (! hls.interrupted()) {
-				log.Println("websocket playerversion write:", err)
-			}
-			return NETWORK_ERROR
-		}
-
-		err = writeJson(OBJ{
-			"type": "watch",
-			"body": OBJ{
-				"command": "getpermit",
-				"requirement": OBJ{
-					"broadcastId": hls.broadcastId,
-					"room": OBJ{
-						"isCommentable": true,
-						"protocol": "webSocket",
-					},
-					"route": "",
-					"stream": OBJ{
-						"isLowLatency": false,
-						"priorStreamQuality": hls.quality, //"abr", // high
-						"protocol": "hls",
-						"requireNewStream": true,
-					},
-				},
-			},
-		})
-		if err != nil {
-			if (! hls.interrupted()) {
+			if !hls.interrupted() {
 				log.Println("websocket getpermit write:", err)
 			}
 			return NETWORK_ERROR
@@ -1597,7 +1606,7 @@ func (hls *NicoHls) startMain() {
 		var playlistStarted bool
 		var watchingStarted bool
 		var watchinginterval int
-		for (! hls.interrupted()) {
+		for !hls.interrupted() {
 			select {
 			case <-sig:
 				return GOT_SIGNAL
@@ -1606,7 +1615,7 @@ func (hls *NicoHls) startMain() {
 			var res interface{}
 			err = conn.ReadJSON(&res)
 			if err != nil {
-				if (! hls.interrupted()) && (! hls.finish) {
+				if (!hls.interrupted()) && (!hls.finish) {
 					log.Println("websocket read:", err)
 				}
 				return NETWORK_ERROR
@@ -1616,124 +1625,118 @@ func (hls *NicoHls) startMain() {
 			}
 
 			_type, ok := objs.FindString(res, "type")
-			if (! ok) {
+			if !ok {
 				fmt.Printf("type not found\n")
 				continue
 			}
 			switch _type {
-			case "watch":
-				if cmd, ok := objs.FindString(res, "body", "command"); ok {
-					switch cmd {
-					case "watchinginterval":
-						if arr, ok := objs.FindArray(res, "body", "params"); ok {
-							for _, intf := range arr {
-								if str, ok := intf.(string); ok {
-									num, e := strconv.Atoi(str)
-									if e == nil && num > 0 {
-										//hls.SetInterval(num)
-										watchinginterval = num
-										break
-									}
-								}
+			//case "watch":
+			//if cmd, ok := objs.FindString(res, "body", "command"); ok {
+			//switch cmd {
+			case "seat":
+				if _arr, ok := objs.FindFloat64(res, "data", "keepIntervalSec"); ok {
+					arr := []interface{}{_arr}
+					for _, intf := range arr {
+						if str, ok := intf.(float64); ok {
+							num := int(str)
+							if num > 0 {
+								//hls.SetInterval(num)
+								watchinginterval = num
+								break
 							}
 						}
-
-						if (! watchingStarted) && watchinginterval > 0 {
-							watchingStarted = true
-							hls.startPGoroutine(func(sig <-chan struct{}) int {
-								for {
-									select {
-									case <-time.After(time.Duration(watchinginterval) * time.Second):
-										err := writeJson(OBJ{
-											"type": "watch",
-											"body": OBJ{
-												"command": "watching",
-												"params": []string{
-													hls.broadcastId,
-													"-1",
-													"0",
-												},
-											},
-										})
-										if err != nil {
-											if (! hls.interrupted()) {
-												log.Println("websocket watching:", err)
-											}
-											return NETWORK_ERROR
-										}
-									case <-sig:
-										return GOT_SIGNAL
-									}
-								}
-							})
-						}
-
-					case "currentstream":
-						if uri, ok := objs.FindString(res, "body", "currentStream", "uri"); ok {
-							if (! playlistStarted) && uri != "" {
-								playlistStarted = true
-								hls.startPlaylist(uri)
-							}
-						}
-
-					case "disconnect":
-						// print params
-						if arr, ok := objs.FindArray(res, "body", "params"); ok {
-							fmt.Printf("%v\n", arr)
-							if len(arr) >= 2 {
-								if s, ok := arr[1].(string); ok {
-									switch s {
-									case "END_PROGRAM":
-										return MAIN_END_PROGRAM
-									case "SERVICE_TEMPORARILY_UNAVAILABLE", "INTERNAL_SERVERERROR":
-										return MAIN_TEMPORARILY_ERROR
-									case "TOO_MANY_CONNECTIONS":
-										return MAIN_DISCONNECT
-									case "TEMPORARILY_CROWDED":
-										return MAIN_END_PROGRAM
-									}
-								}
-							}
-						}
-						return MAIN_DISCONNECT
-
-					case "currentroom":
-						// comment
-						messageServerUri, ok := objs.FindString(res, "body", "room", "messageServerUri")
-						if !ok {
-							break
-						}
-						threadId, ok := objs.FindString(res, "body", "room", "threadId")
-						if !ok {
-							break
-						}
-						hls.startComment(messageServerUri, threadId)
-
-					case "statistics":
-					case "permit":
-					case "servertime":
-					case "schedule":
-						// nop
-					default:
-						fmt.Printf("%#v\n", res)
-						fmt.Printf("unknown command: %s\n", cmd)
-					} // end switch "command"
+					}
 				}
+
+				if (!watchingStarted) && watchinginterval > 0 {
+					watchingStarted = true
+					hls.startPGoroutine(func(sig <-chan struct{}) int {
+						for {
+							select {
+							case <-time.After(time.Duration(watchinginterval) * time.Second):
+								err := writeJson(OBJ{
+									"type": "keepSeat",
+								})
+								if err != nil {
+									if !hls.interrupted() {
+										log.Println("websocket watching:", err)
+									}
+									return NETWORK_ERROR
+								}
+							case <-sig:
+								return GOT_SIGNAL
+							}
+						}
+					})
+				}
+
+			case "stream":
+				if uri, ok := objs.FindString(res, "data", "uri"); ok {
+					if (!playlistStarted) && uri != "" {
+						playlistStarted = true
+						hls.startPlaylist(uri)
+					}
+				}
+
+			case "disconnect":
+				// print params
+				if _arr, ok := objs.FindString(res, "data", "reason"); ok {
+					arr := []interface{}{0, _arr}
+					fmt.Printf("%v\n", arr)
+					if len(arr) >= 2 {
+						if s, ok := arr[1].(string); ok {
+							switch s {
+							case "END_PROGRAM":
+								return MAIN_END_PROGRAM
+							case "SERVICE_TEMPORARILY_UNAVAILABLE", "INTERNAL_SERVERERROR":
+								return MAIN_TEMPORARILY_ERROR
+							case "TOO_MANY_CONNECTIONS":
+								return MAIN_DISCONNECT
+							case "TEMPORARILY_CROWDED":
+								return MAIN_END_PROGRAM
+							}
+						}
+					}
+				}
+				return MAIN_DISCONNECT
+
+			case "room":
+				// comment
+				messageServerUri, ok := objs.FindString(res, "data", "messageServer", "uri")
+				if !ok {
+					break
+				}
+				threadId, ok := objs.FindString(res, "data", "threadId")
+				if !ok {
+					break
+				}
+				hls.startComment(messageServerUri, threadId)
+
+			case "statistics":
+			case "permit":
+			case "serverTime":
+			case "schedule":
+				// nop
+				//default:
+				//	fmt.Printf("%#v\n", res)
+				//	fmt.Printf("unknown command: %s\n", cmd)
+				//} // end switch "command"
+				//}
+				// "watch"
 
 			case "ping":
 				err := writeJson(OBJ{
 					"type": "pong",
-					"body": OBJ{},
 				})
 				if err != nil {
-					if (! hls.interrupted()) {
+					if !hls.interrupted() {
 						log.Println("websocket watching:", err)
 					}
 					return NETWORK_ERROR
 				}
 			case "error":
-				code, ok := objs.FindString(res, "body", "code")
-				if (! ok) {
+				code, ok := objs.FindString(res, "data", "code")
+				if !ok {
 					log.Printf("Unknown error: %#v\n", res)
 					return ERROR_SHUTDOWN
 				}
@@ -1764,8 +1767,8 @@ func (hls *NicoHls) startMain() {
 				case "INVALID_MESSAGE":
 					// 公式のTSで送られてきた。単純に無視する。
 				default:
-				//	log.Printf("Unknown error: %s\n%#v\n", code, res)
-				//	return ERROR_SHUTDOWN
+					//	log.Printf("Unknown error: %s\n%#v\n", code, res)
+					//	return ERROR_SHUTDOWN
 					fmt.Printf("error code: %v\n", code)
 					if hls.msgErrorSeqNo == hls.playlist.seqNo {
 						hls.msgErrorCount++
@@ -1788,6 +1791,10 @@ func (hls *NicoHls) startMain() {
 	})
 }
 
+func (hls *NicoHls) startMainV1() {
+	return // old startMain
+}
+
 func (hls *NicoHls) serve(hlsPort int) {
 	hls.startMGoroutine(func(sig <-chan struct{}) int {
 		gin.SetMode(gin.ReleaseMode)
@@ -1798,7 +1805,7 @@ func (hls *NicoHls) serve(hlsPort int) {
 		router.GET("", func(c *gin.Context) {
 			seqno := hls.dbGetLastSeqNo()
 			body := fmt.Sprintf(
-`#EXTM3U
+				`#EXTM3U
 #EXT-X-VERSION:3
 #EXT-X-TARGETDURATION:1
 #EXT-X-MEDIA-SEQUENCE:%d
@@ -1812,7 +1819,7 @@ func (hls *NicoHls) serve(hlsPort int) {
 #EXTINF:1.0,
 /ts/%d/test.ts
 
-`, seqno - 2, seqno - 2, seqno - 1, seqno)
+`, seqno-2, seqno-2, seqno-1, seqno)
 			c.Data(http.StatusOK, "application/x-mpegURL", []byte(body))
 			return
 		})
@@ -1834,7 +1841,7 @@ func (hls *NicoHls) serve(hlsPort int) {
 
 		chLocal := make(chan struct{})
 		idleConnsClosed := make(chan struct{})
-		defer func(){
+		defer func() {
 			close(chLocal)
 		}()
 		go func() {
@@ -1931,8 +1938,8 @@ func postTsRsvBase(num int, vid, session string) (err error) {
 
 	var token string
 	if ma := regexp.MustCompile(
-	`TimeshiftActions\.(doRegister|confirmToWatch|moveWatch)\(['"].*?['"]\s*(?:,\s*['"](.+?)['"])`).
-	FindStringSubmatch(dat0); len(ma) > 0 {
+		`TimeshiftActions\.(doRegister|confirmToWatch|moveWatch)\(['"].*?['"]\s*(?:,\s*['"](.+?)['"])`).
+		FindStringSubmatch(dat0); len(ma) > 0 {
 		if len(ma) > 2 {
 			token = ma[2]
 		}
@@ -1953,21 +1960,21 @@ func postTsRsvBase(num int, vid, session string) (err error) {
 	var vals url.Values
 	if num == 0 {
 		vals = url.Values{
-			"mode": []string{"overwrite"},
-			"vid": []string{vid},
-			"token": []string{token},
-			"rec_pos": []string{""},
+			"mode":       []string{"overwrite"},
+			"vid":        []string{vid},
+			"token":      []string{token},
+			"rec_pos":    []string{""},
 			"rec_engine": []string{""},
-			"rec_id": []string{""},
-			"_": []string{""},
+			"rec_id":     []string{""},
+			"_":          []string{""},
 		}
 	} else {
 		vals = url.Values{
 			"accept": []string{"true"},
-			"mode": []string{"use"},
-			"vid": []string{vid},
-			"token": []string{token},
-			"_": []string{""},
+			"mode":   []string{"use"},
+			"vid":    []string{vid},
+			"token":  []string{token},
+			"_":      []string{""},
 		}
 	}
 
@@ -1978,7 +1985,7 @@ func postTsRsvBase(num int, vid, session string) (err error) {
 		}
 		return
 	}
-	if (! strings.Contains(dat1, "status=\"ok\"")) && (! strings.Contains(dat1, "\"regist_finished\"")) {
+	if (!strings.Contains(dat1, "status=\"ok\"")) && (!strings.Contains(dat1, "\"regist_finished\"")) {
 		fmt.Printf("postTsRsv: status not ok: >>>%s<<<\n", dat1)
 		err = fmt.Errorf("postTsRsv: status not ok")
 		return
@@ -2027,7 +2034,7 @@ func getProps(opt options.Option) (props interface{}, isFlash, notLogin, tsRsv0,
 		}
 		return
 	} else if strings.Contains(dat, "nicoliveplayer.swf") {
-	// 旧Flashプレイヤー
+		// 旧Flashプレイヤー
 		isFlash = true
 	} else if regexp.MustCompile(`この番組は.{1,50}に終了`).MatchString(dat) {
 		// タイムシフト予約ボタン
@@ -2094,40 +2101,40 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin, reserved bool,
 
 	proplist := map[string][]string{
 		// "broadcaster" // nicocas
-		"cas-userName": []string{"broadcaster", "nickname"}, // ユーザ名
-		"cas-userPageUrl": []string{"broadcaster", "pageUrl"}, // "http://www.nicovideo.jp/user/\d+"
+		"cas-userName":    []string{"broadcaster", "nickname"}, // ユーザ名
+		"cas-userPageUrl": []string{"broadcaster", "pageUrl"},  // "http://www.nicovideo.jp/user/\d+"
 		// "community"
 		"comId": []string{"community", "id"}, // "co\d+"
 		// "program"
-		"beginTime": []string{"program", "beginTime"}, // integer
-		"broadcastId": []string{"program", "broadcastId"}, // "\d+"
-		"description": []string{"program", "description"}, // 放送説明
-		"endTime": []string{"program", "endTime"}, // integer
-		"isFollowerOnly": []string{"program", "isFollowerOnly"}, // bool
-		"isPrivate": []string{"program", "isPrivate"}, // bool
-		"mediaServerType": []string{"program", "mediaServerType"}, // "DMC"
-		"nicoliveProgramId": []string{"program", "nicoliveProgramId"}, // "lv\d+"
-		"openTime": []string{"program", "openTime"}, // integer
-		"providerType": []string{"program", "providerType"}, // "community"
-		"status": []string{"program", "status"}, //
-		"userName": []string{"program", "supplier", "name"}, // ユーザ名
-		"userPageUrl": []string{"program", "supplier", "pageUrl"}, // "http://www.nicovideo.jp/user/\d+"
-		"title": []string{"program", "title"}, // title
+		"beginTime":         []string{"program", "beginTime"},           // integer
+		"broadcastId":       []string{"program", "broadcastId"},         // "\d+"
+		"description":       []string{"program", "description"},         // 放送説明
+		"endTime":           []string{"program", "endTime"},             // integer
+		"isFollowerOnly":    []string{"program", "isFollowerOnly"},      // bool
+		"isPrivate":         []string{"program", "isPrivate"},           // bool
+		"mediaServerType":   []string{"program", "mediaServerType"},     // "DMC"
+		"nicoliveProgramId": []string{"program", "nicoliveProgramId"},   // "lv\d+"
+		"openTime":          []string{"program", "openTime"},            // integer
+		"providerType":      []string{"program", "providerType"},        // "community"
+		"status":            []string{"program", "status"},              //
+		"userName":          []string{"program", "supplier", "name"},    // ユーザ名
+		"userPageUrl":       []string{"program", "supplier", "pageUrl"}, // "http://www.nicovideo.jp/user/\d+"
+		"title":             []string{"program", "title"},               // title
 		// "site"
-		"nicocas": []string{"site", "nicocas"}, //
+		"nicocas":        []string{"site", "nicocas"},                //
 		"//webSocketUrl": []string{"site", "relive", "webSocketUrl"}, // "ws://..."
-		"serverTime": []string{"site", "serverTime"}, // integer
+		"serverTime":     []string{"site", "serverTime"},             // integer
 		// "socialGroup"
 		"socDescription": []string{"socialGroup", "description"}, // コミュ説明
-		"socId": []string{"socialGroup", "id"}, // "co\d+" or "ch\d+"
-		"socLevel": []string{"socialGroup", "level"}, // integer
-		"socName": []string{"socialGroup", "name"}, // community name
-		"socType": []string{"socialGroup", "type"}, // "community"
+		"socId":          []string{"socialGroup", "id"},          // "co\d+" or "ch\d+"
+		"socLevel":       []string{"socialGroup", "level"},       // integer
+		"socName":        []string{"socialGroup", "name"},        // community name
+		"socType":        []string{"socialGroup", "type"},        // "community"
 		// "user"
-		"accountType": []string{"user", "accountType"}, // "premium"
-		"//myId": []string{"user", "id"}, // "\d+"
-		"isLoggedIn": []string{"user", "isLoggedIn"}, // bool
-		"//myNickname": []string{"user", "nickname"}, // string
+		"accountType":  []string{"user", "accountType"}, // "premium"
+		"//myId":       []string{"user", "id"},          // "\d+"
+		"isLoggedIn":   []string{"user", "isLoggedIn"},  // bool
+		"//myNickname": []string{"user", "nickname"},    // string
 	}
 
 	kv := map[string]interface{}{}
@@ -2178,31 +2185,31 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin, reserved bool,
 		done = true
 	}
 
-/*
-	pageUrl, _ := objs.FindString(props, "broadcaster", "pageUrl")
+	/*
+		pageUrl, _ := objs.FindString(props, "broadcaster", "pageUrl")
 
-	if regexp.MustCompile(`\Ahttps?://cas\.nicovideo\.jp/.*?/.*`).MatchString(pageUrl) {
-		// 実験放送
-		userId, ok := objs.FindString(props, "broadcaster", "id")
-		if ! ok {
-			fmt.Printf("userId not found")
+		if regexp.MustCompile(`\Ahttps?://cas\.nicovideo\.jp/.*?/.*`).MatchString(pageUrl) {
+			// 実験放送
+			userId, ok := objs.FindString(props, "broadcaster", "id")
+			if ! ok {
+				fmt.Printf("userId not found")
+			}
+
+			nickname, ok := objs.FindString(props, "broadcaster", "nickname")
+			if ! ok {
+				fmt.Printf("nickname not found")
+			}
+
+			var isArchive bool
+			switch status {
+				case "ENDED":
+					isArchive = true
+			}
+
 		}
 
-		nickname, ok := objs.FindString(props, "broadcaster", "nickname")
-		if ! ok {
-			fmt.Printf("nickname not found")
-		}
-
-		var isArchive bool
-		switch status {
-			case "ENDED":
-				isArchive = true
-		}
-
-	}
-
-	log4gui.Info(fmt.Sprintf("isLoggedIn: %v, user_id: %s, nickname: %s", isLoggedIn, user_id, nickname))
-*/
+		log4gui.Info(fmt.Sprintf("isLoggedIn: %v, user_id: %s, nickname: %s", isLoggedIn, user_id, nickname))
+	*/
 
 	return
 }
