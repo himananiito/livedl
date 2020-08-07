@@ -104,7 +104,7 @@ func (hls *NicoHls) dbCreate() (err error) {
 		mail      TEXT,
 		premium   INTEGER,
 		score     INTEGER,
-		thread    INTEGER,
+		thread    TEXT,
 		origin    TEXT,
 		locale    TEXT,
 		hash      TEXT UNIQUE NOT NULL
@@ -319,7 +319,7 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 		var mail      string
 		var premium   int64
 		var score     int64
-		var thread    int64
+		var thread    string
 		var origin    string
 		var locale    string
 		err = rows.Scan(
@@ -352,7 +352,7 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 		}
 
 		line := fmt.Sprintf(
-			`<chat thread="%d" vpos="%d" date="%d" date_usec="%d" user_id="%s"`,
+			`<chat thread="%s" vpos="%d" date="%d" date_usec="%d" user_id="%s"`,
 			thread,
 			vpos,
 			date,
