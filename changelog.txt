@@ -1,5 +1,10 @@
 ﻿更新履歴
 
+・livedl で YouTube Live を扱えるようにするためのパッチ（リビジョン1）
+patch は livedl.youtube-r1.patch のみ適用
+https://egg.5ch.net/test/read.cgi/software/1595715643/402
+https://egg.5ch.net/test/read.cgi/software/1595715643/406
+
 ・livedl で HTTP のタイムアウト時間を変更できるようにするパッチ
 https://egg.5ch.net/test/read.cgi/software/1595715643/272
 
