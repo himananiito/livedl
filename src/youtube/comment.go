@@ -121,7 +121,7 @@ MAINLOOP:
 					if !ok {
 						continue
 					}
-					message, _ := objs.FindString(liveChatMessageRenderer, "message", "simpleText")
+					message, _ := objs.FindString(liveChatMessageRenderer, "message", "runs", "text")
 					timestampUsec, ok := objs.FindString(liveChatMessageRenderer, "timestampUsec")
 					if !ok {
 						continue
