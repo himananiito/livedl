@@ -139,6 +139,12 @@ MAINLOOP:
 							}
 						}
 					}
+					var others string
+					var amount string
+					amount, _ = objs.FindString(liveChatMessageRenderer, "purchaseAmountText", "simpleText")
+					if amount != "" {
+						others += ` amount="` + html.EscapeString(amount) +  `"`
+					}
 					timestampUsec, ok := objs.FindString(liveChatMessageRenderer, "timestampUsec")
 					if !ok {
 						continue
@@ -146,7 +152,7 @@ MAINLOOP:
 
 					if false {
 						fmt.Printf("%v ", videoOffsetTimeMsec)
-						fmt.Printf("%v %v %v %v %v %v\n", timestampUsec, count, authorName, authorExternalChannelId, message, id)
+						fmt.Printf("%v %v %v %v %v %v [%v ]\n", timestampUsec, count, authorName, authorExternalChannelId, message, id, others)
 					}
 
 					dbInsert(ctx, gm, db, mtx,
@@ -157,6 +163,7 @@ MAINLOOP:
 						authorExternalChannelId,
 						message,
 						continuation,
+						others,
 						count,
 					)
 					count++
@@ -280,6 +287,7 @@ func dbCreate(ctx context.Context, db *sql.DB) (err error) {
 		channelId           TEXT,
 		message             TEXT,
 		continuation        TEXT,
+		others              TEXT,
 		count               INTEGER NOT NULL
 	)
 	`)
@@ -301,7 +309,7 @@ func dbCreate(ctx context.Context, db *sql.DB) (err error) {
 }
 
 func dbInsert(ctx context.Context, gm *gorman.GoroutineManager, db *sql.DB, mtx *sync.Mutex,
-	id, timestampUsec, videoOffsetTimeMsec, authorName, authorExternalChannelId, message, continuation string, count int) {
+	id, timestampUsec, videoOffsetTimeMsec, authorName, authorExternalChannelId, message, continuation, others string, count int) {
 
 	usec, err := strconv.ParseInt(timestampUsec, 10, 64)
 	if err != nil {
@@ -321,14 +329,14 @@ func dbInsert(ctx context.Context, gm *gorman.GoroutineManager, db *sql.DB, mtx 
 	}
 
 	query := `INSERT OR IGNORE INTO comment
-		(id, timestampUsec, videoOffsetTimeMsec, authorName, channelId, message, continuation, count) VALUES (?,?,?,?,?,?,?,?)`
+		(id, timestampUsec, videoOffsetTimeMsec, authorName, channelId, message, continuation, others, count) VALUES (?,?,?,?,?,?,?,?,?)`
 
 	gm.Go(func(<-chan struct{}) int {
 		mtx.Lock()
 		defer mtx.Unlock()
 
 		if _, err := db.ExecContext(ctx, query,
-			id, usec, offset, authorName, authorExternalChannelId, message, continuation, count,
+			id, usec, offset, authorName, authorExternalChannelId, message, continuation, others, count,
 		); err != nil {
 			if err.Error() != "context canceled" {
 				fmt.Println(err)
@@ -355,6 +363,7 @@ var SelComment = `SELECT
 	authorName,
 	channelId,
 	message,
+	others,
 	count
 	FROM comment
 	ORDER BY timestampUsec
@@ -395,6 +404,7 @@ func WriteComment(db *sql.DB, fileName string) {
 		var authorName string
 		var channelId string
 		var message string
+		var others string
 		var count int64
 
 		err = rows.Scan(
@@ -403,6 +413,7 @@ func WriteComment(db *sql.DB, fileName string) {
 			&authorName,
 			&channelId,
 			&message,
+			&others,
 			&count,
 		)
 		if err != nil {
@@ -422,12 +433,13 @@ func WriteComment(db *sql.DB, fileName string) {
 		}
 
 		line := fmt.Sprintf(
-			`<chat vpos="%d" date="%d" date_usec="%d" user_id="%s" name="%s" no="%d"`,
+			`<chat vpos="%d" date="%d" date_usec="%d" user_id="%s" name="%s"%s no="%d"`,
 			vpos,
 			(timestampUsec / (1000 * 1000)),
 			(timestampUsec % (1000 * 1000)),
 			channelId,
 			html.EscapeString(authorName),
+			others,
 			count,
 		)
 
