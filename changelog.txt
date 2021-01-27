@@ -1,5 +1,17 @@
 ﻿更新履歴
 
+・金額のフォーマットの要望ないみたいだからこっちで勝手に決めさせてもらったよ
+https://egg.5ch.net/test/read.cgi/software/1595715643/543
+
+Youtube Liveのコメントにamount属性を追加
+
+・livedl で YouTubeLive リプレイのコメントが取れるよう直したよ
+https://egg.5ch.net/test/read.cgi/software/1595715643/523
+
+Youtube Liveのコメントが途中で切れるのを修正
+Youtube liveのアーカイブダウンロード中に`json decode error'となり中断するのを修正
+(404エラーになる場合は少しwaitする)
+
 20210524.37
 ・2021/01/01までに5chで公開されたniconico関係の全てのパッチを適用
 
