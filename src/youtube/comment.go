@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 	"html"
+	"io/ioutil"
 
 	"github.com/himananiito/livedl/files"
 	"github.com/himananiito/livedl/gorman"
@@ -19,6 +20,8 @@ import (
 	"github.com/himananiito/livedl/objs"
 	_ "github.com/mattn/go-sqlite3"
 )
+
+type OBJ = map[string]interface{}
 
 func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan struct{}, isReplay bool, continuation, name string) (done bool) {
 
@@ -51,21 +54,36 @@ MAINLOOP:
 		timeoutMs, _done, err, neterr := func() (timeoutMs int, _done bool, err, neterr error) {
 			var uri string
 			if isReplay {
-				uri = fmt.Sprintf("https://www.youtube.com/live_chat_replay/get_live_chat_replay?continuation=%s&pbj=1", continuation)
+				uri = fmt.Sprintf("https://www.youtube.com/youtubei/v1/live_chat/get_live_chat_replay?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8")
 			} else {
-				uri = fmt.Sprintf("https://www.youtube.com/live_chat/get_live_chat?continuation=%s&pbj=1", continuation)
+				uri = fmt.Sprintf("https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8")
 			}
 
-			code, buff, err, neterr := httpbase.GetBytes(uri, map[string]string{
-				"Cookie":     Cookie,
+			postData := OBJ{
+				"context": OBJ{
+					"client": OBJ{
+						"clientName": "WEB",
+						"clientVersion": "2.20210128.02.00",
+					},
+				},
+				"continuation": continuation,
+			}
+			resp, err, neterr := httpbase.PostJson(uri, map[string]string {
+				"Cookie": Cookie,
 				"User-Agent": UserAgent,
-			})
+			}, postData)
 			if err != nil {
 				return
 			}
 			if neterr != nil {
 				return
 			}
+			buff, neterr := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+			if neterr != nil {
+				return
+			}
+			code := resp.StatusCode
 			if code != 200 {
 				if code == 404 {
 					fmt.Printf("Status code: %v (ignored)\n", code)
@@ -84,7 +102,7 @@ MAINLOOP:
 				return
 			}
 
-			liveChatContinuation, ok := objs.Find(data, "response", "continuationContents", "liveChatContinuation")
+			liveChatContinuation, ok := objs.Find(data, "continuationContents", "liveChatContinuation")
 			if !ok {
 				err = fmt.Errorf("(response liveChatContinuation) not found")
 				return
