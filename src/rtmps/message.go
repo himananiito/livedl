@@ -1,45 +1,44 @@
 package rtmps
 
 import (
-	"encoding/binary"
-	"time"
 	"bytes"
-	"log"
-	"io"
-
+	"encoding/binary"
 	"fmt"
-	"../amf"
+	"io"
+	"log"
+	"time"
+
+	"github.com/himananiito/livedl/amf"
 )
 
 const (
-	TID_SETCHUNKSIZE = 1
-	TID_ABORT = 2
-	TID_ACKNOWLEDGEMENT = 3
-	TID_USERCONTROL = 4
-	TID_WINDOW_ACK_SIZE = 5
+	TID_SETCHUNKSIZE     = 1
+	TID_ABORT            = 2
+	TID_ACKNOWLEDGEMENT  = 3
+	TID_USERCONTROL      = 4
+	TID_WINDOW_ACK_SIZE  = 5
 	TID_SETPEERBANDWIDTH = 6
-	TID_AUDIO = 8
-	TID_VIDEO = 9
-	TID_AMF3COMMAND = 17
-	TID_AMF0COMMAND = 20
-	TID_AMF0DATA = 18
-	TID_AMF3DATA = 15
-	TID_AGGREGATE = 22
+	TID_AUDIO            = 8
+	TID_VIDEO            = 9
+	TID_AMF3COMMAND      = 17
+	TID_AMF0COMMAND      = 20
+	TID_AMF0DATA         = 18
+	TID_AMF3DATA         = 15
+	TID_AGGREGATE        = 22
 )
 
 const (
-	UC_STREAMBEGIN = 0
-	UC_STREAMEOF = 1
-	UC_STREAMDRY = 2
-	UC_SETBUFFERLENGTH = 3
+	UC_STREAMBEGIN      = 0
+	UC_STREAMEOF        = 1
+	UC_STREAMDRY        = 2
+	UC_SETBUFFERLENGTH  = 3
 	UC_STREAMISRECORDED = 4
-	UC_PINGREQUEST = 6
-	UC_PINGRESPONSE = 7
+	UC_PINGREQUEST      = 6
+	UC_PINGRESPONSE     = 7
 
 	UC_BUFFEREMPTY = 31
 	UC_BUFFERREADY = 32
 )
-
 
 func intToBE16(num int) (data []byte) {
 	tmp := make([]byte, 2)
@@ -65,7 +64,6 @@ func intToLE32(num int) (data []byte) {
 	data = append(data, tmp[:]...)
 	return
 }
-
 
 func chunkBasicHeader(fmt, csid int) (data []byte) {
 	if 2 <= csid && csid <= 63 {
@@ -120,7 +118,7 @@ func type0(buff *bytes.Buffer, csId int, typeId byte, streamId int, length int) 
 func type3(buff *bytes.Buffer, csId int) {
 	buff.Write(chunkBasicHeader(3, csId))
 }
-func encodeAcknowledgement(asz int) (buff *bytes.Buffer, err error){
+func encodeAcknowledgement(asz int) (buff *bytes.Buffer, err error) {
 	buff = bytes.NewBuffer(nil)
 	bsz := intToBE32(asz)
 	type0(buff, 2, TID_ACKNOWLEDGEMENT, 0, len(bsz))
@@ -129,7 +127,7 @@ func encodeAcknowledgement(asz int) (buff *bytes.Buffer, err error){
 	}
 	return
 }
-func encodeWindowAckSize(asz int) (buff *bytes.Buffer, err error){
+func encodeWindowAckSize(asz int) (buff *bytes.Buffer, err error) {
 	buff = bytes.NewBuffer(nil)
 	bsz := intToBE32(asz)
 	type0(buff, 2, TID_WINDOW_ACK_SIZE, 0, len(bsz))
@@ -138,7 +136,7 @@ func encodeWindowAckSize(asz int) (buff *bytes.Buffer, err error){
 	}
 	return
 }
-func encodeSetPeerBandwidth(wsz, lim int) (buff *bytes.Buffer, err error){
+func encodeSetPeerBandwidth(wsz, lim int) (buff *bytes.Buffer, err error) {
 	buff = bytes.NewBuffer(nil)
 	b := intToBE32(wsz)
 	b = append(b, byte(lim))
@@ -149,7 +147,7 @@ func encodeSetPeerBandwidth(wsz, lim int) (buff *bytes.Buffer, err error){
 	return
 }
 
-func encodePingResponse(timestamp int) (buff *bytes.Buffer, err error){
+func encodePingResponse(timestamp int) (buff *bytes.Buffer, err error) {
 	buff = bytes.NewBuffer(nil)
 
 	var body []byte
@@ -162,7 +160,7 @@ func encodePingResponse(timestamp int) (buff *bytes.Buffer, err error){
 	}
 	return
 }
-func encodeSetBufferLength(streamId, length int) (buff *bytes.Buffer, err error){
+func encodeSetBufferLength(streamId, length int) (buff *bytes.Buffer, err error) {
 	buff = bytes.NewBuffer(nil)
 
 	var body []byte
@@ -210,37 +208,36 @@ func amf0Command(chunkSize, csId, streamId int, body []byte) (wbuff *bytes.Buffe
 	return
 }
 
-
-
 func decodeFmtCsId(rdr io.Reader, msg *rtmpMsg) (err error) {
 	b0 := make([]byte, 1)
 	msg.hdrLength++
-	_, err = io.ReadFull(rdr, b0); if err != nil {
+	_, err = io.ReadFull(rdr, b0)
+	if err != nil {
 		return
 	}
 	format := (int(b0[0]) >> 6) & 3
 	csId := int(b0[0]) & 0x3F
 	switch csId {
-		case 0:
-			b1 := make([]byte, 1)
-			msg.hdrLength++
-			if _, err = io.ReadFull(rdr, b1); err != nil {
-				return
-			}
-			csId = int(b1[0]) + 64
+	case 0:
+		b1 := make([]byte, 1)
+		msg.hdrLength++
+		if _, err = io.ReadFull(rdr, b1); err != nil {
+			return
+		}
+		csId = int(b1[0]) + 64
 
-		case 1:
-			b1 := make([]byte, 2)
-			msg.hdrLength += 2
-			if _, err = io.ReadFull(rdr, b1); err != nil {
-				return
-			}
-			csId = (int(b1[1]) << 8) | (int(b1[0]) + 64)
+	case 1:
+		b1 := make([]byte, 2)
+		msg.hdrLength += 2
+		if _, err = io.ReadFull(rdr, b1); err != nil {
+			return
+		}
+		csId = (int(b1[1]) << 8) | (int(b1[0]) + 64)
 	}
 
 	msg.format = format
 	msg.csId = csId
-	if (! msg.readingBody) {
+	if !msg.readingBody {
 		msg.formatOrigin = format
 		msg.csIdOrigin = csId
 	}
@@ -306,7 +303,7 @@ func decodeTimestampEX(rdr io.Reader, msg *rtmpMsg) (err error) {
 		return
 	}
 	//fmt.Printf("decodeTimestampEX %v\n", timestamp)
-	if (! msg.readingBody) {
+	if !msg.readingBody {
 		msg.timestampEx = timestamp
 	}
 
@@ -359,26 +356,23 @@ func decodeType2(rdr io.Reader, msg *rtmpMsg) (err error) {
 	return
 }
 
-
-
-
 type rtmpMsg struct {
-	format int
-	formatOrigin int
-	csId int
-	csIdOrigin int
-	timestampField int
-	timestampDelta int
-	timestampEx int
+	format          int
+	formatOrigin    int
+	csId            int
+	csIdOrigin      int
+	timestampField  int
+	timestampDelta  int
+	timestampEx     int
 	timestampActual int
-	msgLength int
-	msgTypeId int
-	msgStreamId int
-	bodyBuff *bytes.Buffer
+	msgLength       int
+	msgTypeId       int
+	msgStreamId     int
+	bodyBuff        *bytes.Buffer
 
 	readingBody bool
-	hdrLength int
-	splitCount int
+	hdrLength   int
+	splitCount  int
 }
 
 func readChunkBody(rdr io.Reader, msg *rtmpMsg, csz int) (err error) {
@@ -387,7 +381,7 @@ func readChunkBody(rdr io.Reader, msg *rtmpMsg, csz int) (err error) {
 		msg.bodyBuff = bytes.NewBuffer(nil)
 	}
 	rem := msg.msgLength - msg.bodyBuff.Len()
-//fmt.Printf("readChunkBody: %v %v\n", msg.msgLength, msg.bodyBuff.Len())
+	//fmt.Printf("readChunkBody: %v %v\n", msg.msgLength, msg.bodyBuff.Len())
 	if rem > csz {
 		_, err = io.CopyN(msg.bodyBuff, rdr, int64(csz))
 	} else {
@@ -405,35 +399,35 @@ func decodeHeader(rdr io.Reader, msg *rtmpMsg) (err error) {
 		return
 	}
 	switch msg.format {
-		case 0:
-			if err = decodeType0(rdr, msg); err != nil {
-				return
-			}
-		case 1:
-			if err = decodeType1(rdr, msg); err != nil {
-				return
-			}
-		case 2:
-			if err = decodeType2(rdr, msg); err != nil {
-				return
-			}
-		case 3:
-			if (msg.readingBody) {
-				msg.splitCount++
-				if msg.csId != msg.csIdOrigin {
-					err = &DecodeError{
-						Fun: "decodeHeader",
-						Msg: fmt.Sprintf("msg.csId(%d) != msg.csIdOrigin(%d)", msg.csId, msg.csIdOrigin),
-					}
-					return
-				}
-			}
-		default:
-			err = &DecodeError{
-				Fun: "decodeHeader",
-				Msg: fmt.Sprintf("Unknown fmt: %v", msg.format),
-			}
+	case 0:
+		if err = decodeType0(rdr, msg); err != nil {
 			return
+		}
+	case 1:
+		if err = decodeType1(rdr, msg); err != nil {
+			return
+		}
+	case 2:
+		if err = decodeType2(rdr, msg); err != nil {
+			return
+		}
+	case 3:
+		if msg.readingBody {
+			msg.splitCount++
+			if msg.csId != msg.csIdOrigin {
+				err = &DecodeError{
+					Fun: "decodeHeader",
+					Msg: fmt.Sprintf("msg.csId(%d) != msg.csIdOrigin(%d)", msg.csId, msg.csIdOrigin),
+				}
+				return
+			}
+		}
+	default:
+		err = &DecodeError{
+			Fun: "decodeHeader",
+			Msg: fmt.Sprintf("Unknown fmt: %v", msg.format),
+		}
+		return
 	}
 
 	return
@@ -477,55 +471,56 @@ func decodeUserControl(rbuff *bytes.Buffer) (res []int, err error) {
 	}
 	res = append(res, evt)
 	switch evt {
-		case UC_BUFFEREMPTY, UC_BUFFERREADY: // Buffer Empty, Buffer Ready
-			// http://repo.or.cz/w/rtmpdump.git/blob/8880d1456b282ee79979adbe7b6a6eb8ad371081:/librtmp/rtmp.c#l2787
+	case UC_BUFFEREMPTY, UC_BUFFERREADY: // Buffer Empty, Buffer Ready
+		// http://repo.or.cz/w/rtmpdump.git/blob/8880d1456b282ee79979adbe7b6a6eb8ad371081:/librtmp/rtmp.c#l2787
 
-		case
-			UC_STREAMBEGIN,
-			UC_STREAMEOF,
-			UC_STREAMDRY,
-			UC_STREAMISRECORDED,
-			UC_PINGREQUEST,
-			UC_PINGRESPONSE:
-			// 4-byte stream id
-			num, e := decodeBEInt32(rbuff)
-			if e != nil {
-				err = e
-				return
-			}
-			res = append(res, num)
-
-		case UC_SETBUFFERLENGTH:
-			// 4-byte stream id
-			sid, e := decodeBEInt32(rbuff)
-			if e != nil {
-				err = e
-				return
-			}
-			res = append(res, sid)
-			// 4-byte buffer length
-			bsz, e := decodeBEInt32(rbuff)
-			if e != nil {
-				err = e
-				return
-			}
-			res = append(res, bsz)
-
-		default:
-			err = &DecodeError{
-				Fun: "decodeUserControl",
-				Msg: fmt.Sprintf("Unknown User control: %v", evt),
-			}
+	case
+		UC_STREAMBEGIN,
+		UC_STREAMEOF,
+		UC_STREAMDRY,
+		UC_STREAMISRECORDED,
+		UC_PINGREQUEST,
+		UC_PINGRESPONSE:
+		// 4-byte stream id
+		num, e := decodeBEInt32(rbuff)
+		if e != nil {
+			err = e
 			return
+		}
+		res = append(res, num)
+
+	case UC_SETBUFFERLENGTH:
+		// 4-byte stream id
+		sid, e := decodeBEInt32(rbuff)
+		if e != nil {
+			err = e
+			return
+		}
+		res = append(res, sid)
+		// 4-byte buffer length
+		bsz, e := decodeBEInt32(rbuff)
+		if e != nil {
+			err = e
+			return
+		}
+		res = append(res, bsz)
+
+	default:
+		err = &DecodeError{
+			Fun: "decodeUserControl",
+			Msg: fmt.Sprintf("Unknown User control: %v", evt),
+		}
+		return
 	}
 	return
 }
 
 type message struct {
-	msg_t int
+	msg_t     int
 	timestamp int
-	data *bytes.Buffer
+	data      *bytes.Buffer
 }
+
 func decodeMessage(rbuff *bytes.Buffer) (res message, err error) {
 	msg_t, err := decodeInt8(rbuff)
 	if err != nil {
@@ -550,7 +545,7 @@ func decodeMessage(rbuff *bytes.Buffer) (res message, err error) {
 	if err != nil {
 		return
 	}
-//fmt.Printf("debug decodeMessage: type(%v) len(%v) ts(%v)\n", msg_t, plen, ts_0)
+	//fmt.Printf("debug decodeMessage: type(%v) len(%v) ts(%v)\n", msg_t, plen, ts_0)
 	buff := bytes.NewBuffer(nil)
 	if _, err = io.CopyN(buff, rbuff, int64(plen)); err != nil {
 		return
@@ -563,9 +558,9 @@ func decodeMessage(rbuff *bytes.Buffer) (res message, err error) {
 	}
 
 	res = message{
-		msg_t: msg_t,
+		msg_t:     msg_t,
 		timestamp: ts,
-		data: buff,
+		data:      buff,
 	}
 
 	return
@@ -582,7 +577,7 @@ func decodeAggregate(rbuff *bytes.Buffer) (res []message, err error) {
 	return
 }
 
-func decodeOne(rdr io.Reader, csz int, info map[int] chunkInfo) (ts int, msg_t int, res interface{}, rsz int, err error) {
+func decodeOne(rdr io.Reader, csz int, info map[int]chunkInfo) (ts int, msg_t int, res interface{}, rsz int, err error) {
 	msg := rtmpMsg{}
 
 	// rtmp header
@@ -595,7 +590,7 @@ func decodeOne(rdr io.Reader, csz int, info map[int] chunkInfo) (ts int, msg_t i
 	var prevChunk chunkInfo
 	if msg.formatOrigin != 0 {
 		var ok bool
-		if prevChunk, ok = info[msg.csIdOrigin]; (! ok) {
+		if prevChunk, ok = info[msg.csIdOrigin]; !ok {
 			err = &DecodeError{
 				Fun: "decodeOne",
 				Msg: fmt.Sprintf("Not exists previous chunk(csId = %v)", msg.csIdOrigin),
@@ -610,47 +605,47 @@ func decodeOne(rdr io.Reader, csz int, info map[int] chunkInfo) (ts int, msg_t i
 		}
 		//fmt.Printf("%#v\n", msg)
 		switch msg.formatOrigin {
-			case 0:
-				msg.timestampActual = msg.timestampEx
-				msg.timestampDelta = msg.timestampEx
-			case 1, 2:
-				msg.timestampActual = prevChunk.timestampActual + msg.timestampEx
-				msg.timestampDelta = msg.timestampEx
-			case 3:
-				msg.timestampActual = msg.timestampEx
-				msg.timestampDelta = msg.timestampEx
-				msg.timestampField = 0xffffff
+		case 0:
+			msg.timestampActual = msg.timestampEx
+			msg.timestampDelta = msg.timestampEx
+		case 1, 2:
+			msg.timestampActual = prevChunk.timestampActual + msg.timestampEx
+			msg.timestampDelta = msg.timestampEx
+		case 3:
+			msg.timestampActual = msg.timestampEx
+			msg.timestampDelta = msg.timestampEx
+			msg.timestampField = 0xffffff
 		}
 	} else {
 		switch msg.formatOrigin {
-			case 0:
-				msg.timestampActual = msg.timestampField
-				msg.timestampDelta = msg.timestampField
-			case 1, 2:
-				msg.timestampActual = prevChunk.timestampActual + msg.timestampField
-				msg.timestampDelta = msg.timestampField
-			case 3:
-				msg.timestampActual = prevChunk.timestampActual + prevChunk.timestampDelta
-				msg.timestampDelta = prevChunk.timestampDelta
+		case 0:
+			msg.timestampActual = msg.timestampField
+			msg.timestampDelta = msg.timestampField
+		case 1, 2:
+			msg.timestampActual = prevChunk.timestampActual + msg.timestampField
+			msg.timestampDelta = msg.timestampField
+		case 3:
+			msg.timestampActual = prevChunk.timestampActual + prevChunk.timestampDelta
+			msg.timestampDelta = prevChunk.timestampDelta
 		}
 	}
 
 	switch msg.formatOrigin {
-		case 1:
-			msg.msgStreamId = prevChunk.msgStreamId
-		case 2, 3:
-			msg.msgLength = prevChunk.msgLength
-			msg.msgTypeId = prevChunk.msgTypeId
-			msg.msgStreamId = prevChunk.msgStreamId
+	case 1:
+		msg.msgStreamId = prevChunk.msgStreamId
+	case 2, 3:
+		msg.msgLength = prevChunk.msgLength
+		msg.msgTypeId = prevChunk.msgTypeId
+		msg.msgStreamId = prevChunk.msgStreamId
 	}
 
 	info[msg.csId] = chunkInfo{
-		timestampField: msg.timestampField,
-		timestampDelta: msg.timestampDelta,
+		timestampField:  msg.timestampField,
+		timestampDelta:  msg.timestampDelta,
 		timestampActual: msg.timestampActual,
-		msgLength: msg.msgLength,
-		msgTypeId: msg.msgTypeId,
-		msgStreamId: msg.msgStreamId,
+		msgLength:       msg.msgLength,
+		msgTypeId:       msg.msgTypeId,
+		msgStreamId:     msg.msgStreamId,
 	}
 
 	ts = msg.timestampActual
@@ -673,61 +668,61 @@ func decodeOne(rdr io.Reader, csz int, info map[int] chunkInfo) (ts int, msg_t i
 		}
 
 		// timestamp extended
-		if (msg.timestampField == 0xffffff) {
+		if msg.timestampField == 0xffffff {
 			if err = decodeTimestampEX(rdr, &msg); err != nil {
 				return
 			}
 		}
 	}
 
-//fmt.Printf("debug rtmp decodeOne: %#v\n", msg)
+	//fmt.Printf("debug rtmp decodeOne: %#v\n", msg)
 	// read byte count
 	rsz = msg.hdrLength + msg.msgLength
 
 	msg_t = msg.msgTypeId
 	switch msg.msgTypeId {
-		case TID_AGGREGATE:
-			if res, err = decodeAggregate(msg.bodyBuff); err != nil {
-				return
-			}
-
-		case TID_AUDIO, TID_VIDEO:
-			res = msg.bodyBuff
-
-		case TID_WINDOW_ACK_SIZE:
-			if res, err = decodeWindowAckSize(msg.bodyBuff); err != nil {
-				return
-			}
-		case TID_SETPEERBANDWIDTH:
-			if res, err = decodeSetPeerBandwidth(msg.bodyBuff); err != nil {
-				return
-			}
-		case TID_AMF0COMMAND:
-			if res, err = amf.DecodeAmf0(msg.bodyBuff.Bytes()); err != nil {
-				return
-			}
-		case TID_AMF3COMMAND:
-			if res, err = amf.DecodeAmf0(msg.bodyBuff.Bytes(), true); err != nil {
-				return
-			}
-		case TID_AMF0DATA:
-			if res, err = amf.DecodeAmf0(msg.bodyBuff.Bytes()); err != nil {
-				return
-			}
-		case TID_SETCHUNKSIZE:
-			if res, err = decodeSetChunkSize(msg.bodyBuff); err != nil {
-				return
-			}
-		case TID_USERCONTROL:
-			if res, err = decodeUserControl(msg.bodyBuff); err != nil {
-				return
-			}
-		default:
-			err = &DecodeError{
-				Fun: "decodeOne",
-				Msg: fmt.Sprintf("msgTypeId: not implement: %v\n%#v", msg.msgTypeId, msg.bodyBuff.Bytes()),
-			}
+	case TID_AGGREGATE:
+		if res, err = decodeAggregate(msg.bodyBuff); err != nil {
 			return
+		}
+
+	case TID_AUDIO, TID_VIDEO:
+		res = msg.bodyBuff
+
+	case TID_WINDOW_ACK_SIZE:
+		if res, err = decodeWindowAckSize(msg.bodyBuff); err != nil {
+			return
+		}
+	case TID_SETPEERBANDWIDTH:
+		if res, err = decodeSetPeerBandwidth(msg.bodyBuff); err != nil {
+			return
+		}
+	case TID_AMF0COMMAND:
+		if res, err = amf.DecodeAmf0(msg.bodyBuff.Bytes()); err != nil {
+			return
+		}
+	case TID_AMF3COMMAND:
+		if res, err = amf.DecodeAmf0(msg.bodyBuff.Bytes(), true); err != nil {
+			return
+		}
+	case TID_AMF0DATA:
+		if res, err = amf.DecodeAmf0(msg.bodyBuff.Bytes()); err != nil {
+			return
+		}
+	case TID_SETCHUNKSIZE:
+		if res, err = decodeSetChunkSize(msg.bodyBuff); err != nil {
+			return
+		}
+	case TID_USERCONTROL:
+		if res, err = decodeUserControl(msg.bodyBuff); err != nil {
+			return
+		}
+	default:
+		err = &DecodeError{
+			Fun: "decodeOne",
+			Msg: fmt.Sprintf("msgTypeId: not implement: %v\n%#v", msg.msgTypeId, msg.bodyBuff.Bytes()),
+		}
+		return
 	}
 
 	return

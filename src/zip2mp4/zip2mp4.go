@@ -1,36 +1,37 @@
 package zip2mp4
 
 import (
-	"fmt"
 	"archive/zip"
-	"regexp"
-	"strconv"
-	"log"
-	"sort"
+	"bytes"
+	"database/sql"
+	"fmt"
 	"io"
+	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
-	"io/ioutil"
-	"../files"
-	"../log4gui"
-
-	"database/sql"
-	_ "github.com/mattn/go-sqlite3"
-	"bytes"
+	"regexp"
+	"sort"
+	"strconv"
 	"time"
-	"../niconico"
-	"../youtube"
-	"../procs/ffmpeg"
+
+	"github.com/himananiito/livedl/files"
+	"github.com/himananiito/livedl/log4gui"
+	"github.com/himananiito/livedl/niconico"
+	"github.com/himananiito/livedl/procs/ffmpeg"
+	"github.com/himananiito/livedl/youtube"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type ZipMp4 struct {
-	ZipName string
+	ZipName       string
 	Mp4NameOpened string
-	mp4List []string
+	mp4List       []string
 
-	FFMpeg *exec.Cmd
+	FFMpeg  *exec.Cmd
 	FFStdin io.WriteCloser
 }
+
 var cmdListFF = []string{
 	"./bin/ffmpeg/ffmpeg",
 	"./bin/ffmpeg",
@@ -47,6 +48,7 @@ var cmdListMP42TS = []string{
 	"./mp42ts",
 	"mp42ts",
 }
+
 // return cmd = nil if cmd not exists
 func openProg(cmdList *[]string, stdinEn, stdoutEn, stdErrEn, consoleEn bool, args []string) (cmd *exec.Cmd, stdin io.WriteCloser, stdout, stderr io.ReadCloser) {
 
@@ -179,7 +181,6 @@ func (z *ZipMp4) OpenFFMpeg(ext string) {
 	z.Mp4NameOpened = name
 	z.mp4List = append(z.mp4List, name)
 
-
 	cmd, stdin, err := ffmpeg.Open(
 		"-i", "-",
 		"-c", "copy",
@@ -255,7 +256,7 @@ type Index struct {
 type Chunk struct {
 	VideoIndex *Index
 	AudioIndex *Index
-	VAIndex *Index
+	VAIndex    *Index
 }
 
 func Convert(fileName string) (err error) {
@@ -337,7 +338,7 @@ func Convert(fileName string) (err error) {
 	prevIndex := int64(-1)
 	for _, key := range keys {
 		if prevIndex >= 0 {
-			if key != prevIndex + 1 {
+			if key != prevIndex+1 {
 				// [FIXME] reopen new mp4file?
 				//return fmt.Errorf("\n\nError: seq skipped: %d --> %d\n\n", prevIndex, key)
 
@@ -418,13 +419,13 @@ func Convert(fileName string) (err error) {
 		} else {
 			if (chunks[key].VideoIndex == nil && chunks[key].AudioIndex != nil) ||
 				(chunks[key].VideoIndex != nil && chunks[key].AudioIndex == nil) {
-					fmt.Printf("\nIncomplete sequence. skipped: %d\n", key)
-					if zm != nil {
-						zm.CloseFFInput()
-						zm.Wait()
-					}
-					zm = &ZipMp4{ZipName: fileName}
-					zm.OpenFFMpeg("mp4")
+				fmt.Printf("\nIncomplete sequence. skipped: %d\n", key)
+				if zm != nil {
+					zm.CloseFFInput()
+					zm.Wait()
+				}
+				zm = &ZipMp4{ZipName: fileName}
+				zm.OpenFFMpeg("mp4")
 			}
 		}
 	}
@@ -435,7 +436,6 @@ func Convert(fileName string) (err error) {
 
 	return
 }
-
 
 func ExtractChunks(fileName string, skipHb bool) (done bool, err error) {
 	db, err := sql.Open("sqlite3", fileName)
@@ -532,7 +532,7 @@ func ConvertDB(fileName, ext string, skipHb bool) (done bool, nMp4s int, err err
 
 		// チャンクが飛んでいる場合はファイルを分ける
 		// BANDWIDTHが変わる場合はファイルを分ける
-		if (prevIndex >= 0 && seqno != prevIndex + 1) || (prevBw >= 0 && bw != prevBw) {
+		if (prevIndex >= 0 && seqno != prevIndex+1) || (prevBw >= 0 && bw != prevBw) {
 			if bw != prevBw {
 				fmt.Printf("\nBandwitdh changed: %d --> %d\n\n", prevBw, bw)
 			} else {
@@ -562,8 +562,6 @@ func ConvertDB(fileName, ext string, skipHb bool) (done bool, nMp4s int, err err
 
 	return
 }
-
-
 
 func YtComment(fileName string) (done bool, err error) {
 	db, err := sql.Open("sqlite3", fileName)

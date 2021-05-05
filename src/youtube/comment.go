@@ -1,22 +1,23 @@
 package youtube
 
 import (
-	"fmt"
 	"context"
-	"time"
-	"sync"
 	"database/sql"
-	_ "github.com/mattn/go-sqlite3"
-	"strconv"
 	"encoding/json"
+	"fmt"
 	"log"
-	"path/filepath"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
-	"../gorman"
-	"../files"
-	"../httpbase"
-	"../objs"
+	"sync"
+	"time"
+
+	"github.com/himananiito/livedl/files"
+	"github.com/himananiito/livedl/gorman"
+	"github.com/himananiito/livedl/httpbase"
+	"github.com/himananiito/livedl/objs"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan struct{}, isReplay bool, continuation, name string) (done bool) {
@@ -38,10 +39,13 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 
 	var printTime int64
 
-	MAINLOOP: for {
+MAINLOOP:
+	for {
 		select {
-		case <-ctx.Done(): break MAINLOOP
-		case <-sig: break MAINLOOP
+		case <-ctx.Done():
+			break MAINLOOP
+		case <-sig:
+			break MAINLOOP
 		default:
 		}
 		timeoutMs, _done, err, neterr := func() (timeoutMs int, _done bool, err, neterr error) {
@@ -52,8 +56,8 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 				uri = fmt.Sprintf("https://www.youtube.com/live_chat/get_live_chat?continuation=%s&pbj=1", continuation)
 			}
 
-			code, buff, err, neterr := httpbase.GetBytes(uri, map[string]string {
-				"Cookie": Cookie,
+			code, buff, err, neterr := httpbase.GetBytes(uri, map[string]string{
+				"Cookie":     Cookie,
 				"User-Agent": UserAgent,
 			})
 			if err != nil {
@@ -75,7 +79,7 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 			}
 
 			liveChatContinuation, ok := objs.Find(data, "response", "continuationContents", "liveChatContinuation")
-			if (! ok) {
+			if !ok {
 				err = fmt.Errorf("(response liveChatContinuation) not found")
 				return
 			}
@@ -87,16 +91,16 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 					var item interface{}
 					var ok bool
 					item, ok = objs.Find(a, "addChatItemAction", "item")
-					if (! ok) {
+					if !ok {
 						item, ok = objs.Find(a, "addLiveChatTickerItemAction", "item")
-						if (! ok) {
+						if !ok {
 							item, ok = objs.Find(a, "replayChatItemAction", "actions", "addChatItemAction", "item")
 							if ok {
 								videoOffsetTimeMsec, _ = objs.FindString(a, "replayChatItemAction", "videoOffsetTimeMsec")
 							}
 						}
 					}
-					if (! ok) {
+					if !ok {
 						//objs.PrintAsJson(a)
 						//fmt.Println("(actions item) not found")
 						continue
@@ -104,25 +108,24 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 
 					var liveChatMessageRenderer interface{}
 					liveChatMessageRenderer, ok = objs.Find(item, "liveChatTextMessageRenderer")
-					if (! ok) {
+					if !ok {
 						liveChatMessageRenderer, ok = objs.Find(item, "liveChatPaidMessageRenderer")
 					}
-					if (! ok) {
+					if !ok {
 						continue
 					}
 
 					authorExternalChannelId, _ := objs.FindString(liveChatMessageRenderer, "authorExternalChannelId")
 					authorName, _ := objs.FindString(liveChatMessageRenderer, "authorName", "simpleText")
 					id, ok := objs.FindString(liveChatMessageRenderer, "id")
-					if (! ok) {
+					if !ok {
 						continue
 					}
 					message, _ := objs.FindString(liveChatMessageRenderer, "message", "simpleText")
 					timestampUsec, ok := objs.FindString(liveChatMessageRenderer, "timestampUsec")
-					if (! ok) {
+					if !ok {
 						continue
 					}
-
 
 					if false {
 						fmt.Printf("%v ", videoOffsetTimeMsec)
@@ -145,7 +148,7 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 				// アーカイブ時、20秒毎に進捗を表示
 				if videoOffsetTimeMsec != "" {
 					now := time.Now().Unix()
-					if now - printTime > 20 {
+					if now-printTime > 20 {
 						printTime = now
 						if msec, e := strconv.ParseInt(videoOffsetTimeMsec, 10, 64); e == nil {
 							total := msec / 1000

@@ -2,45 +2,45 @@ package youtube
 
 import (
 	"fmt"
-//	"net/http"
-//	"io/ioutil"
+	//	"net/http"
+	//	"io/ioutil"
 	"bufio"
-	"regexp"
+	"context"
 	"encoding/json"
 	"html"
-	"context"
 	"os"
 	"os/signal"
-	"syscall"
-	"../objs"
-	"../files"
-	"../procs/streamlink"
-	"../procs/youtube_dl"
-	"../gorman"
-	"../httpbase"
-
+	"regexp"
 	"strings"
-	"time"
 	"sync"
-	"../procs"
+	"syscall"
+	"time"
+
+	"github.com/himananiito/livedl/files"
+	"github.com/himananiito/livedl/gorman"
+	"github.com/himananiito/livedl/httpbase"
+	"github.com/himananiito/livedl/objs"
+	"github.com/himananiito/livedl/procs"
+	"github.com/himananiito/livedl/procs/streamlink"
+	"github.com/himananiito/livedl/procs/youtube_dl"
 )
 
 var Cookie = "PREF=f1=50000000&f4=4000000&hl=en"
 var UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36"
 
 var split = func(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	for i := 0; i < len(data) ; i++ {
+	for i := 0; i < len(data); i++ {
 		if data[i] == '\n' {
-			return i + 1, data[:i + 1], nil
+			return i + 1, data[:i+1], nil
 		}
 		if data[i] == '\r' {
 			if (i + 1) == len(data) {
 				return 0, nil, nil
 			}
-			if data[i + 1] == '\n' {
-				return i + 2, data[:i + 2], nil
+			if data[i+1] == '\n' {
+				return i + 2, data[:i+2], nil
 			}
-			return i + 1, data[:i + 1], nil
+			return i + 1, data[:i+1], nil
 		}
 	}
 
@@ -69,7 +69,7 @@ func getChatContinuation(buff []byte) (isReplay bool, continuation string, err e
 			"conversationBar",
 			"liveChatRenderer",
 		)
-		if (! ok) {
+		if !ok {
 			err = fmt.Errorf("liveChatRenderer not found")
 			return
 		}
@@ -82,7 +82,7 @@ func getChatContinuation(buff []byte) (isReplay bool, continuation string, err e
 			"sortFilterSubMenuRenderer",
 			"subMenuItems",
 		)
-		if (! ok) {
+		if !ok {
 			err = fmt.Errorf("subMenuItems not found")
 			return
 		}
@@ -92,7 +92,7 @@ func getChatContinuation(buff []byte) (isReplay bool, continuation string, err e
 			//selected, _ := objs.FindBool(item, "selected")
 			c, _ := objs.FindString(item, "continuation", "reloadContinuationData", "continuation")
 
-			if (title != "") && (! strings.Contains(title, "Top")) {
+			if (title != "") && (!strings.Contains(title, "Top")) {
 				continuation = c
 				return
 			}
@@ -127,7 +127,7 @@ func getInfo(buff []byte) (title, ucid, author string, err error) {
 	//objs.PrintAsJson(data); return
 
 	title, ok := objs.FindString(data, "args", "title")
-	if (! ok) {
+	if !ok {
 		err = fmt.Errorf("title not found")
 		return
 	}
@@ -150,7 +150,7 @@ func execStreamlink(gm *gorman.GoroutineManager, uri, name string) (notSupport b
 
 	// stdout
 	gm.Go(func(c <-chan struct{}) int {
-		defer func(){
+		defer func() {
 			chEof <- struct{}{}
 		}()
 		scanner := bufio.NewScanner(stdout)
@@ -165,7 +165,7 @@ func execStreamlink(gm *gorman.GoroutineManager, uri, name string) (notSupport b
 
 	// stderr
 	gm.Go(func(c <-chan struct{}) int {
-		defer func(){
+		defer func() {
 			chEof <- struct{}{}
 		}()
 		scanner := bufio.NewScanner(stderr)
@@ -177,7 +177,6 @@ func execStreamlink(gm *gorman.GoroutineManager, uri, name string) (notSupport b
 
 		return 0
 	})
-
 
 	// outputs
 	gm.Go(func(c <-chan struct{}) int {
@@ -237,7 +236,7 @@ func execYoutube_dl(gm *gorman.GoroutineManager, uri, name string) (err error) {
 
 	// stdout
 	gm.Go(func(c <-chan struct{}) int {
-		defer func(){
+		defer func() {
 			chEof <- struct{}{}
 		}()
 		scanner := bufio.NewScanner(stdout)
@@ -252,7 +251,7 @@ func execYoutube_dl(gm *gorman.GoroutineManager, uri, name string) (err error) {
 
 	// stderr
 	gm.Go(func(c <-chan struct{}) int {
-		defer func(){
+		defer func() {
 			chEof <- struct{}{}
 		}()
 		scanner := bufio.NewScanner(stderr)
@@ -282,7 +281,7 @@ func execYoutube_dl(gm *gorman.GoroutineManager, uri, name string) (err error) {
 			} else {
 				if strings.HasPrefix(s, "[download]") {
 					var now = time.Now().UnixNano()
-					if now - old > 2 * 1000 * 1000 * 1000 {
+					if now-old > 2*1000*1000*1000 {
 						old = now
 					} else {
 						continue
@@ -303,8 +302,8 @@ var COMMENT_DONE = 1000
 func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
 
 	uri := fmt.Sprintf("https://www.youtube.com/watch?v=%s", id)
-	code, buff, err, neterr := httpbase.GetBytes(uri, map[string]string {
-		"Cookie": Cookie,
+	code, buff, err, neterr := httpbase.GetBytes(uri, map[string]string{
+		"Cookie":     Cookie,
 		"User-Agent": UserAgent,
 	})
 	if err != nil {
@@ -329,7 +328,6 @@ func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
 
 	isReplay, continuation, err := getChatContinuation(buff)
 
-
 	origName := fmt.Sprintf("%s-%s_%s.mp4", author, title, id)
 	origName = files.ReplaceForbidden(origName)
 	name, err := files.GetFileNameNext(origName)
@@ -352,7 +350,7 @@ func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
 		default:
 			gm.Cancel()
 			if gmCom != nil {
-				gmCom.Cancel();
+				gmCom.Cancel()
 			}
 		}
 	})
@@ -364,7 +362,7 @@ func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
 			func() {
 				mtxComDone.Lock()
 				defer mtxComDone.Unlock()
-				commentDone = true;
+				commentDone = true
 			}()
 		default:
 			gmCom.Cancel()
@@ -400,17 +398,18 @@ func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
 
 	gm.Go(func(c <-chan struct{}) int {
 		select {
-		case <-c: cancel()
+		case <-c:
+			cancel()
 		}
 		return 0
 	})
 
 	var retry bool
-	if (! ytNoStreamlink) {
+	if !ytNoStreamlink {
 		retry, err = execStreamlink(gm, uri, name)
 	}
 	if !interrupt {
-		if err != nil || retry || (ytNoStreamlink && (! ytNoYoutube_dl)) {
+		if err != nil || retry || (ytNoStreamlink && (!ytNoYoutube_dl)) {
 			execYoutube_dl(gm, uri, name)
 		}
 	}

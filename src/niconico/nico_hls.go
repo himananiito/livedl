@@ -1,46 +1,36 @@
 package niconico
 
 import (
-	"fmt"
-
+	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"html"
 	"io/ioutil"
+	"log"
+	"math"
 	"net/http"
+	_ "net/http/pprof"
 	"net/url"
-	"regexp"
-	"time"
-
 	"os"
 	"os/signal"
-	"sync"
-
-	"github.com/gorilla/websocket"
-
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
-
-	"log"
-	"runtime"
+	"sync"
 	"syscall"
+	"time"
 
-	"../files"
-	"../objs"
-	"../options"
-
-	"database/sql"
-
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
+	"github.com/himananiito/livedl/files"
+	"github.com/himananiito/livedl/gorman"
+	"github.com/himananiito/livedl/httpbase"
+	"github.com/himananiito/livedl/objs"
+	"github.com/himananiito/livedl/options"
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/sha3"
-
-	"context"
-	"math"
-	_ "net/http/pprof"
-
-	"../httpbase"
-	"github.com/gin-gonic/gin"
-
-	"../gorman"
 )
 
 type OBJ = map[string]interface{}

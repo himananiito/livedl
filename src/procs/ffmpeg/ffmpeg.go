@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"../base"
+
+	"github.com/himananiito/livedl/procs/base"
 )
 
 var cmdList = []string{
@@ -17,7 +18,7 @@ var cmdList = []string{
 	"ffmpeg",
 }
 
-func Open(opt... string) (cmd *exec.Cmd, stdin io.WriteCloser, err error) {
+func Open(opt ...string) (cmd *exec.Cmd, stdin io.WriteCloser, err error) {
 	cmd, stdin, _, _, err = base.Open(&cmdList, true, false, false, true, opt)
 	if cmd == nil {
 		err = fmt.Errorf("ffmpeg not found")

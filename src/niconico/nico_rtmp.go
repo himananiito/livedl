@@ -1,24 +1,25 @@
 package niconico
 
 import (
-	"fmt"
 	"encoding/xml"
+	"fmt"
 	"io/ioutil"
+	"log"
+	"net/url"
 	"regexp"
 	"strings"
-	"net/url"
 	"sync"
-	"log"
 	"time"
-	"../rtmps"
-	"../amf"
-	"../options"
-	"../files"
-	"../httpbase"
+
+	"github.com/himananiito/livedl/amf"
+	"github.com/himananiito/livedl/files"
+	"github.com/himananiito/livedl/httpbase"
+	"github.com/himananiito/livedl/options"
+	"github.com/himananiito/livedl/rtmps"
 )
 
 type Content struct {
-	Id string `xml:"id,attr"`
+	Id   string `xml:"id,attr"`
 	Text string `xml:",chardata"`
 }
 type Tickets struct {
@@ -26,28 +27,29 @@ type Tickets struct {
 	Text string `xml:",chardata"`
 }
 type Status struct {
-	Title                   string  `xml:"stream>title"`
-	CommunityId             string  `xml:"stream>default_community"`
-	Id                      string  `xml:"stream>id"`
-	Provider                string  `xml:"stream>provider_type"`
-	IsArchive               bool    `xml:"stream>archive"`
-	IsArchivePlayerServer   bool    `xml:"stream>is_archiveplayserver"`
+	Title                 string    `xml:"stream>title"`
+	CommunityId           string    `xml:"stream>default_community"`
+	Id                    string    `xml:"stream>id"`
+	Provider              string    `xml:"stream>provider_type"`
+	IsArchive             bool      `xml:"stream>archive"`
+	IsArchivePlayerServer bool      `xml:"stream>is_archiveplayserver"`
 	Ques                  []string  `xml:"stream>quesheet>que"`
 	Contents              []Content `xml:"stream>contents_list>contents"`
-	IsPremium               bool    `xml:"user>is_premium"`
-	Url                     string  `xml:"rtmp>url"`
-	Ticket                  string  `xml:"rtmp>ticket"`
+	IsPremium             bool      `xml:"user>is_premium"`
+	Url                   string    `xml:"rtmp>url"`
+	Ticket                string    `xml:"rtmp>ticket"`
 	Tickets               []Tickets `xml:"tickets>stream"`
-	ErrorCode               string  `xml:"error>code"`
+	ErrorCode             string    `xml:"error>code"`
 	streams               []Stream
-	chStream                chan struct{}
-	wg                     *sync.WaitGroup
+	chStream              chan struct{}
+	wg                    *sync.WaitGroup
 }
 type Stream struct {
-	originUrl string
-	streamName string
+	originUrl    string
+	streamName   string
 	originTicket string
 }
+
 func (status *Status) quesheet() {
 	stream := make(map[string][]Stream)
 	playType := make(map[string]string)
@@ -60,12 +62,12 @@ func (status *Status) quesheet() {
 		// /publish lv* /content/*/lv*_*_1_*.f4v
 		if ma := re_pub.FindStringSubmatch(q); len(ma) >= 5 {
 			stream[ma[1]] = append(stream[ma[1]], Stream{
-				originUrl: ma[2],
-				streamName: ma[3],
+				originUrl:    ma[2],
+				streamName:   ma[3],
 				originTicket: ma[4],
 			})
 
-		// /play ...
+			// /play ...
 		} else if ma := re_play.FindStringSubmatch(q); len(ma) > 0 {
 			// /play case:sp:rtmp:lv*_s_lv*,mobile:rtmp:lv*_s_lv*_sub1,premium:rtmp:lv*_s_lv*_sub1,default:rtmp:lv*_s_lv* main
 			if strings.HasPrefix(ma[1], "case:") {
@@ -80,7 +82,7 @@ func (status *Status) quesheet() {
 					}
 				}
 
-			// /play rtmp:lv* main
+				// /play rtmp:lv* main
 			} else {
 				re := regexp.MustCompile(`\Artmp:(\S+?)\z`)
 				if ma := re.FindStringSubmatch(ma[1]); len(ma) > 0 {
@@ -92,14 +94,14 @@ func (status *Status) quesheet() {
 
 	pt, ok := playType["premium"]
 	if ok && status.IsPremium {
-		s, ok := stream[ pt ]
+		s, ok := stream[pt]
 		if ok {
 			status.streams = s
 		}
 	} else {
 		pt, ok := playType["default"]
 		if ok {
-			s, ok := stream[ pt ]
+			s, ok := stream[pt]
 			if ok {
 				status.streams = s
 			}
@@ -113,11 +115,11 @@ func (status *Status) initStreams() {
 	}
 
 	//if status.isOfficialLive() {
-		status.contentsOfficialLive()
+	status.contentsOfficialLive()
 	//} else if status.isLive() {
-		status.contentsNonOfficialLive()
+	status.contentsNonOfficialLive()
 	//} else {
-		status.quesheet()
+	status.quesheet()
 	//}
 
 	return
@@ -128,7 +130,7 @@ func (status *Status) getFileName(index int) (name string) {
 		name = fmt.Sprintf("%s-%s-%s.flv", status.Id, status.CommunityId, status.Title)
 	} else if len(status.streams) > 1 {
 		//name = fmt.Sprintf("%s-%d.flv", status.Id, 1 + index)
-		name = fmt.Sprintf("%s-%s-%s#%d.flv", status.Id, status.CommunityId, status.Title, 1 + index)
+		name = fmt.Sprintf("%s-%s-%s#%d.flv", status.Id, status.CommunityId, status.Title, 1+index)
 	} else {
 		log.Fatalf("No stream")
 	}
@@ -142,8 +144,8 @@ func (status *Status) contentsNonOfficialLive() {
 	for _, c := range status.Contents {
 		if ma := re.FindStringSubmatch(c.Text); len(ma) > 0 {
 			status.streams = append(status.streams, Stream{
-				originUrl: ma[1],
-				streamName: ma[2],
+				originUrl:    ma[1],
+				streamName:   ma[2],
 				originTicket: ma[3],
 			})
 		}
@@ -152,7 +154,7 @@ func (status *Status) contentsNonOfficialLive() {
 }
 func (status *Status) contentsOfficialLive() {
 
-	tickets := make(map[string] string)
+	tickets := make(map[string]string)
 	for _, t := range status.Tickets {
 		tickets[t.Name] = t.Text
 	}
@@ -171,21 +173,21 @@ func (status *Status) contentsOfficialLive() {
 				if ma := re.FindStringSubmatch(c); len(ma) > 0 {
 					fmt.Printf("\n%#v\n", ma)
 					switch ma[1] {
-						default:
-							fmt.Printf("unknown contents case %#v\n", ma[1])
-						case "mobile":
-						case "middle":
-						case "default":
-							status.Url = ma[2]
-							t, ok := tickets[ma[3]]
-							if (! ok) {
-								fmt.Printf("not found %s\n", ma[3])
-							}
-							fmt.Printf("%s\n", t)
-							status.streams = append(status.streams, Stream{
-								streamName: ma[3],
-								originTicket: t,
-							})
+					default:
+						fmt.Printf("unknown contents case %#v\n", ma[1])
+					case "mobile":
+					case "middle":
+					case "default":
+						status.Url = ma[2]
+						t, ok := tickets[ma[3]]
+						if !ok {
+							fmt.Printf("not found %s\n", ma[3])
+						}
+						fmt.Printf("%s\n", t)
+						status.streams = append(status.streams, Stream{
+							streamName:   ma[3],
+							originTicket: t,
+						})
 					}
 				}
 			}
@@ -249,16 +251,18 @@ func (status *Status) isTs() bool {
 	return status.IsArchive
 }
 func (status *Status) isLive() bool {
-	return (! status.IsArchive)
+	return (!status.IsArchive)
 }
 func (status *Status) isOfficialLive() bool {
-	return (status.Provider == "official") && (! status.IsArchive)
+	return (status.Provider == "official") && (!status.IsArchive)
 }
 func (status *Status) isOfficialTs() bool {
 	if status.IsArchive {
 		switch status.Provider {
-		case "official": return true
-		case "channel": return status.IsArchivePlayerServer
+		case "official":
+			return true
+		case "channel":
+			return status.IsArchivePlayerServer
 		}
 	}
 	return false
@@ -288,7 +292,7 @@ func (st Stream) noticeStreamName(offset int) (s string) {
 }
 
 func (status *Status) recStream(index int, opt options.Option) (err error) {
-	defer func(){
+	defer func() {
 		<-status.chStream
 		status.wg.Done()
 	}()
@@ -306,7 +310,7 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 		// swfUrl
 		"http://live.nicovideo.jp/nicoliveplayer.swf?180116154229",
 		// pageUrl
-		"http://live.nicovideo.jp/watch/" + status.Id,
+		"http://live.nicovideo.jp/watch/"+status.Id,
 		// option
 		status.Ticket,
 	)
@@ -315,13 +319,11 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 	}
 	defer rtmp.Close()
 
-
 	fileName, err := files.GetFileNameNext(status.getFileName(index))
 	if err != nil {
 		return
 	}
 	rtmp.SetFlvName(fileName)
-
 
 	tryRecord := func() (incomplete bool, err error) {
 
@@ -365,13 +367,13 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 					return
 				}
 				data, e := rtmp.Command(
-					"sendFileRequest", []interface{} {
-					nil,
-					amf.SwitchToAmf3(),
-					[]string{
-						stream.streamName,
-					},
-				})
+					"sendFileRequest", []interface{}{
+						nil,
+						amf.SwitchToAmf3(),
+						[]string{
+							stream.streamName,
+						},
+					})
 				if e != nil {
 					err = e
 					return
@@ -394,7 +396,7 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 				time.Sleep(10 * time.Second)
 			}
 
-		} else if (! status.isOfficialLive()) {
+		} else if !status.isOfficialLive() {
 			// /publishの第二引数
 			// streamName(param1:String)
 			// 「,」で区切る
@@ -406,37 +408,37 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 			// relayStreamName: streamNameの頭からスラッシュまでを削除したもの
 
 			_, err = rtmp.Command(
-				"nlPlayNotice", []interface{} {
-				nil,
-				// _connection.request.originUrl
-				stream.originUrl,
+				"nlPlayNotice", []interface{}{
+					nil,
+					// _connection.request.originUrl
+					stream.originUrl,
 
-				// this._connection.request.playStreamRequest
-				// originticket あるなら
-				// playStreamName ? this._originTicket
-				// 無いなら playStreamName
-				stream.noticeStreamName(offset),
+					// this._connection.request.playStreamRequest
+					// originticket あるなら
+					// playStreamName ? this._originTicket
+					// 無いなら playStreamName
+					stream.noticeStreamName(offset),
 
-				// var _loc1_:String = this._relayStreamName;
-				// if(this._offset != -2)
-				// {
-				// _loc1_ = _loc1_ + ("_" + this.offset);
-				// }
-				// user nama: String 'lvxxxxxxxxx'
-				// user kako: lvxxxxxxxxx_xxxxxxxxxxxx_1_xxxxxx.f4v_0
-				stream.relayStreamName(offset),
+					// var _loc1_:String = this._relayStreamName;
+					// if(this._offset != -2)
+					// {
+					// _loc1_ = _loc1_ + ("_" + this.offset);
+					// }
+					// user nama: String 'lvxxxxxxxxx'
+					// user kako: lvxxxxxxxxx_xxxxxxxxxxxx_1_xxxxxx.f4v_0
+					stream.relayStreamName(offset),
 
-				// seek offset
-				// user nama: -2, user kako: 0
-				offset,
-			})
+					// seek offset
+					// user nama: -2, user kako: 0
+					offset,
+				})
 			if err != nil {
 				fmt.Printf("nlPlayNotice %v\n", err)
 				return
 			}
 		}
 
-		if err = rtmp.SetBufferLength(1, 3600 * 1000); err != nil {
+		if err = rtmp.SetBufferLength(1, 3600*1000); err != nil {
 			fmt.Printf("SetBufferLength: %v\n", err)
 			return
 		}
@@ -455,7 +457,7 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 		if status.isOfficialTs() {
 			ts := rtmp.GetTimestamp()
 			if ts > 1000 {
-				err = rtmp.PlayTime(streamName, ts - 1000)
+				err = rtmp.PlayTime(streamName, ts-1000)
 			} else {
 				err = rtmp.PlayTime(streamName, -5000)
 			}
@@ -502,13 +504,13 @@ func (status *Status) recStream(index int, opt options.Option) (err error) {
 			// update ticket
 			if true {
 				//if time.Now().Unix() > ticketTime + 60 {
-					//ticketTime = time.Now().Unix()
-					if ticket, e := getTicket(opt); e != nil {
-						err = e
-						return
-					} else {
-						rtmp.SetConnectOpt(ticket)
-					}
+				//ticketTime = time.Now().Unix()
+				if ticket, e := getTicket(opt); e != nil {
+					err = e
+					return
+				} else {
+					rtmp.SetConnectOpt(ticket)
+				}
 				//}
 			}
 
@@ -557,7 +559,7 @@ func (status *Status) recAllStreams(opt options.Option) (err error) {
 		go status.recStream(index, opt)
 
 		now := time.Now().Unix()
-		if now > ticketTime + 60 {
+		if now > ticketTime+60 {
 			ticketTime = now
 			if ticket, e := getTicket(opt); e != nil {
 				err = e

@@ -1,75 +1,77 @@
 package rtmps
 
 import (
-	"net"
-	"fmt"
 	"bytes"
-	"math/rand"
-	"time"
+	"fmt"
 	"io"
 	"io/ioutil"
+	"math/rand"
+	"net"
 	"regexp"
-	"../amf"
-	"../flvs"
-	"../objs"
-	"../files"
+	"time"
+
+	"github.com/himananiito/livedl/amf"
+	"github.com/himananiito/livedl/files"
+	"github.com/himananiito/livedl/flvs"
+	"github.com/himananiito/livedl/objs"
 )
 
 type DecodeError struct {
 	Fun string
 	Msg string
 }
+
 func (e *DecodeError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Fun, e.Msg)
 }
 
 type chunkInfo struct {
-	timestampField int
-	timestampDelta int
+	timestampField  int
+	timestampDelta  int
 	timestampActual int
-	msgLength int
-	msgTypeId int
-	msgStreamId int
+	msgLength       int
+	msgTypeId       int
+	msgStreamId     int
 }
 
 type Rtmp struct {
-	proto string // No reset
-	address string // No reset
-	app string // No reset
-	tcUrl string // No reset
-	swfUrl string // No reset
-	pageUrl string // No reset
+	proto      string // No reset
+	address    string // No reset
+	app        string // No reset
+	tcUrl      string // No reset
+	swfUrl     string // No reset
+	pageUrl    string // No reset
 	connectOpt []interface{}
 
-	conn *net.TCPConn // RESET_ON_CONNECT
-	chunkSizeSend int // RESET_ON_CONNECT
-	chunkSizeRecv int // RESET_ON_CONNECT
-	transactionId int // RESET_ON_CONNECT
-	windowSize int // RESET_ON_CONNECT
-	chunkInfo map[int] chunkInfo // RESET_ON_CONNECT
+	conn          *net.TCPConn      // RESET_ON_CONNECT
+	chunkSizeSend int               // RESET_ON_CONNECT
+	chunkSizeRecv int               // RESET_ON_CONNECT
+	transactionId int               // RESET_ON_CONNECT
+	windowSize    int               // RESET_ON_CONNECT
+	chunkInfo     map[int]chunkInfo // RESET_ON_CONNECT
 
-	readCount int // RESET_ON_CONNECT
+	readCount      int // RESET_ON_CONNECT
 	totalReadBytes int // RESET_ON_CONNECT
-	isRecorded bool
+	isRecorded     bool
 
 	timestamp int // NO_RESET
-	duration int
+	duration  int
 
 	flvName string
-	flv *flvs.Flv
+	flv     *flvs.Flv
 
 	fixAggrTimestamp bool
-	streamId int
-	nextLogTs int
+	streamId         int
+	nextLogTs        int
 
 	VideoExists bool
-	noSeek bool
-	flush bool
+	noSeek      bool
+	flush       bool
 
 	startTime int
 }
 
-func NewRtmp(tc, swf, page string, opt... interface{})(rtmp *Rtmp, err error) {
+func NewRtmp(tc, swf, page string, opt ...interface{}) (rtmp *Rtmp, err error) {
 	re := regexp.MustCompile(`\A(\w+)://([^/\s]+)/(\S+)\z`)
 	mstr := re.FindStringSubmatch(tc)
 	if mstr == nil {
@@ -78,12 +80,12 @@ func NewRtmp(tc, swf, page string, opt... interface{})(rtmp *Rtmp, err error) {
 	}
 
 	rtmp = &Rtmp{
-		proto: mstr[1],
-		address: mstr[2],
-		app: mstr[3],
-		tcUrl: tc,
-		swfUrl: swf,
-		pageUrl: page,
+		proto:      mstr[1],
+		address:    mstr[2],
+		app:        mstr[3],
+		tcUrl:      tc,
+		swfUrl:     swf,
+		pageUrl:    page,
 		connectOpt: opt,
 	}
 
@@ -97,7 +99,7 @@ func (rtmp *Rtmp) Connect() (err error) {
 	}
 
 	rtmp.windowSize = 2500000
-	rtmp.chunkInfo = make(map[int] chunkInfo)
+	rtmp.chunkInfo = make(map[int]chunkInfo)
 	rtmp.chunkSizeSend = 128
 	rtmp.chunkSizeRecv = 128
 	rtmp.transactionId = 1
@@ -120,10 +122,10 @@ func (rtmp *Rtmp) SetFlush(b bool) {
 func (rtmp *Rtmp) SetNoSeek(b bool) {
 	rtmp.noSeek = b
 }
-func (rtmp *Rtmp) SetConnectOpt(opt... interface{}) {
+func (rtmp *Rtmp) SetConnectOpt(opt ...interface{}) {
 	rtmp.connectOpt = opt
 }
-func (rtmp *Rtmp) connect(app, tc, swf, page string, opt... interface{}) (err error) {
+func (rtmp *Rtmp) connect(app, tc, swf, page string, opt ...interface{}) (err error) {
 
 	raddr, err := net.ResolveTCPAddr("tcp", rtmp.address)
 	if err != nil {
@@ -132,17 +134,17 @@ func (rtmp *Rtmp) connect(app, tc, swf, page string, opt... interface{}) (err er
 	}
 
 	switch rtmp.proto {
-		case "rtmp":
-			conn, e := net.DialTCP("tcp", nil, raddr)
-			if e != nil {
-				err = e
-				return
-			}
-			rtmp.conn = conn
-
-		default:
-			err = fmt.Errorf("Unknown protocol: %v", rtmp.proto)
+	case "rtmp":
+		conn, e := net.DialTCP("tcp", nil, raddr)
+		if e != nil {
+			err = e
 			return
+		}
+		rtmp.conn = conn
+
+	default:
+		err = fmt.Errorf("Unknown protocol: %v", rtmp.proto)
+		return
 	}
 
 	err = handshake(rtmp.conn)
@@ -152,17 +154,17 @@ func (rtmp *Rtmp) connect(app, tc, swf, page string, opt... interface{}) (err er
 	}
 
 	var data []interface{}
-	data = append(data, map[string]interface{} {
-		"app"           : app,
-		"flashVer"      : "WIN 29,0,0,113",
-		"swfUrl"        : swf,
-		"tcUrl"         : tc,
-		"fpad"          : false,
-		"capabilities"  : 239,
-		"audioCodecs"   : 0xFFF, //3575,
-		"videoCodecs"   : 0xFF, //252,
-		"videoFunction" : 1,
-		"pageUrl"       : page,
+	data = append(data, map[string]interface{}{
+		"app":            app,
+		"flashVer":       "WIN 29,0,0,113",
+		"swfUrl":         swf,
+		"tcUrl":          tc,
+		"fpad":           false,
+		"capabilities":   239,
+		"audioCodecs":    0xFFF, //3575,
+		"videoCodecs":    0xFF,  //252,
+		"videoFunction":  1,
+		"pageUrl":        page,
 		"objectEncoding": 3,
 	})
 
@@ -181,6 +183,7 @@ const (
 	PAUSE
 	TEST
 )
+
 func (rtmp *Rtmp) wait(findTrId int, pause bool, testTimeout int) (done, incomplete bool, trData interface{}, err error) {
 	var mode int
 	var endUnix int64
@@ -326,7 +329,7 @@ func (rtmp *Rtmp) SetFixAggrTimestamp(sw bool) {
 }
 func (rtmp *Rtmp) CheckStatus(label string, ts int, data interface{}, waitPause bool) (done, incomplete, pauseFound bool, err error) {
 	code, ok := objs.FindString(data, "code")
-	if (! ok) {
+	if !ok {
 		err = fmt.Errorf("%s: code Not found", label)
 		return
 	}
@@ -355,6 +358,7 @@ func (rtmp *Rtmp) CheckStatus(label string, ts int, data interface{}, waitPause 
 	}
 	return
 }
+
 // trId: transaction id to find
 func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trFound, pauseFound bool, trData interface{}, err error) {
 	ts, msg_t, res, rdbytes, err := decodeOne(rtmp.conn, rtmp.chunkSizeRecv, rtmp.chunkInfo)
@@ -449,8 +453,8 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 
 			if /*rtmp.isRecorded &&*/ rtmp.duration > 0 {
 				switch v.msg_t {
-					case TID_AUDIO, TID_VIDEO:
-						// fmt.Printf(" %8d/%d(%4.1f%%) : %2d\n", tsAggr, rtmp.duration, float64(tsAggr)/float64(rtmp.duration)*100, v.msg_t)
+				case TID_AUDIO, TID_VIDEO:
+					// fmt.Printf(" %8d/%d(%4.1f%%) : %2d\n", tsAggr, rtmp.duration, float64(tsAggr)/float64(rtmp.duration)*100, v.msg_t)
 				}
 			}
 
@@ -472,14 +476,14 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 	case TID_AMF0DATA, TID_AMF3DATA:
 		objs.PrintAsJson(res)
 		list, ok := res.([]interface{})
-		if (! ok) {
+		if !ok {
 			err = fmt.Errorf("result AMF Data is not array")
 			return
 		}
 
 		if len(list) >= 2 {
 			name, ok := list[0].(string)
-			if (! ok) {
+			if !ok {
 				err = fmt.Errorf("result AMF Data[0] is not string")
 				return
 			}
@@ -512,19 +516,19 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 		objs.PrintAsJson(res)
 
 		list, ok := res.([]interface{})
-		if (! ok) {
+		if !ok {
 			err = fmt.Errorf("result AMF Command is not array")
 			return
 		}
 
 		if len(list) >= 3 {
 			name, ok := list[0].(string)
-			if (! ok) {
+			if !ok {
 				err = fmt.Errorf("result AMF Command name is not string")
 				return
 			}
 			trIdFloat, ok := list[1].(float64)
-			if (! ok) {
+			if !ok {
 				err = fmt.Errorf("result AMF Command transaction id is not number")
 				return
 			}
@@ -553,42 +557,42 @@ func (rtmp *Rtmp) recvChunk(findTrId int, waitPause bool) (done, incomplete, trF
 
 	case TID_USERCONTROL:
 		switch res.([]int)[0] {
-			case UC_PINGREQUEST:
-				//fmt.Printf("ping request %d\n", res.([]int)[1])
-				if err = rtmp.pingResponse(res.([]int)[1]); err != nil {
-					return
-				}
+		case UC_PINGREQUEST:
+			//fmt.Printf("ping request %d\n", res.([]int)[1])
+			if err = rtmp.pingResponse(res.([]int)[1]); err != nil {
+				return
+			}
 
-			case UC_STREAMBEGIN:
-				rtmp.streamId = res.([]int)[1]
+		case UC_STREAMBEGIN:
+			rtmp.streamId = res.([]int)[1]
 
-			case UC_STREAMISRECORDED:
-				fmt.Printf("stream is recorded\n")
-				rtmp.isRecorded = true
+		case UC_STREAMISRECORDED:
+			fmt.Printf("stream is recorded\n")
+			rtmp.isRecorded = true
 
-			case UC_BUFFEREMPTY:
-				if rtmp.isRecorded {
-					fmt.Printf("required Seek: %d\n", rtmp.timestamp)
-					// <-- test
-					rtmp.PauseRaw()
+		case UC_BUFFEREMPTY:
+			if rtmp.isRecorded {
+				fmt.Printf("required Seek: %d\n", rtmp.timestamp)
+				// <-- test
+				rtmp.PauseRaw()
+				incomplete = true
+				return
+				// test -->
+
+				if rtmp.noSeek {
 					incomplete = true
 					return
-					// test -->
-
-					if rtmp.noSeek {
-						incomplete = true
-						return
-					}
-					ts := rtmp.timestamp - 10000
-					if ts < 0 {
-						ts = 0
-					}
-					done, incomplete, err = rtmp.PauseUnpause(ts)
-					if done || incomplete || err != nil {
-						return
-					}
-					//rtmp.Seek(ts)
 				}
+				ts := rtmp.timestamp - 10000
+				if ts < 0 {
+					ts = 0
+				}
+				done, incomplete, err = rtmp.PauseUnpause(ts)
+				if done || incomplete || err != nil {
+					return
+				}
+				//rtmp.Seek(ts)
+			}
 		}
 	default:
 		//fmt.Printf("got: %8d %d %#v\n", ts, msg_t, res)
@@ -616,7 +620,6 @@ func (rtmp *Rtmp) SetPeerBandwidth(wsz, lim int) (err error) {
 	}
 	return
 }
-
 
 func (rtmp *Rtmp) pingResponse(timestamp int) (err error) {
 	buff, err := encodePingResponse(timestamp)
@@ -653,27 +656,27 @@ func (rtmp *Rtmp) Command(name string, args []interface{}) (trData interface{}, 
 	var csId int
 	var streamId int
 	switch name {
-		case "connect":
-			rtmp.transactionId = 1
-			trId     = rtmp.transactionId
-			csId     = 3
-			streamId = 0
+	case "connect":
+		rtmp.transactionId = 1
+		trId = rtmp.transactionId
+		csId = 3
+		streamId = 0
 
-		case "play", "seek", "pause", "pauseRaw":
-			trId     = 0
-			csId     = 8
-			streamId = 1
+	case "play", "seek", "pause", "pauseRaw":
+		trId = 0
+		csId = 8
+		streamId = 1
 
-		default:
-			// createStream, call, close, ...
-			rtmp.transactionId++
-			trId     = rtmp.transactionId
-			csId     = 3
-			streamId = 0
+	default:
+		// createStream, call, close, ...
+		rtmp.transactionId++
+		trId = rtmp.transactionId
+		csId = 3
+		streamId = 0
 	}
 	cmd := []interface{}{name, trId}
 	cmd = append(cmd, args...)
-objs.PrintAsJson(cmd)
+	objs.PrintAsJson(cmd)
 	body, err := amf.EncodeAmf0(cmd, false)
 	wbuff, err := amf0Command(rtmp.chunkSizeSend, csId, streamId, body)
 
@@ -723,16 +726,16 @@ func (rtmp *Rtmp) PauseUnpause(timestamp int) (done, incomplete bool, err error)
 	if err = rtmp.Pause(timestamp); err != nil {
 		return
 	}
-fmt.Println("paused")
+	fmt.Println("paused")
 	done, incomplete, err = rtmp.WaitPause()
 	if done || incomplete || err != nil {
 		return
 	}
-fmt.Println("wait pause")
+	fmt.Println("wait pause")
 	if err = rtmp.Unpause(timestamp); err != nil {
 		return
 	}
-fmt.Println("Unpaused")
+	fmt.Println("Unpaused")
 	return
 }
 func (rtmp *Rtmp) PlayTime(stream string, timestamp int) (err error) {
@@ -750,7 +753,7 @@ func (rtmp *Rtmp) PlayTime(stream string, timestamp int) (err error) {
 	data = append(data, timestamp) // Start
 	// NicoOfficialTs, Never append Duration and flush
 	if rtmp.flush {
-		data = append(data, -1) // Duration
+		data = append(data, -1)   // Duration
 		data = append(data, true) // flush
 	}
 
@@ -816,5 +819,3 @@ func handshake(conn *net.TCPConn) (err error) {
 	}
 	return
 }
-
-

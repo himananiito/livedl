@@ -2,13 +2,14 @@ package amf0
 
 import (
 	"bytes"
-	"io"
 	"encoding/binary"
-	"math"
 	"fmt"
+	"io"
 	"log"
-	"../amf3"
-	"../amf_t"
+	"math"
+
+	"github.com/himananiito/livedl/amf/amf3"
+	"github.com/himananiito/livedl/amf/amf_t"
 )
 
 func encodeNumber(num float64, buff *bytes.Buffer) (err error) {
@@ -64,7 +65,7 @@ func encodeString(s string, buff *bytes.Buffer) (err error) {
 	err = encodeUtf8(s, buff)
 	return
 }
-func encodeObject(obj map[string]interface {}, buff *bytes.Buffer) (err error) {
+func encodeObject(obj map[string]interface{}, buff *bytes.Buffer) (err error) {
 	if err = buff.WriteByte(3); err != nil {
 		return
 	}
@@ -89,7 +90,7 @@ func encodeNull(buff *bytes.Buffer) error {
 func encodeSwitchToAmf3(buff *bytes.Buffer) error {
 	return buff.WriteByte(0x11)
 }
-func encodeEcmaArray(data map[string]interface {}, buff *bytes.Buffer) (err error) {
+func encodeEcmaArray(data map[string]interface{}, buff *bytes.Buffer) (err error) {
 	if err = buff.WriteByte(8); err != nil {
 		return
 	}
@@ -115,34 +116,34 @@ func encodeEcmaArray(data map[string]interface {}, buff *bytes.Buffer) (err erro
 }
 func encode(data interface{}, asEcmaArray bool, buff *bytes.Buffer) (toAmf3 bool, err error) {
 	switch data.(type) {
-		case string:
-			err = encodeString(data.(string), buff)
-		case float64:
-			err = encodeNumber(data.(float64), buff)
-		case int:
-			err = encodeNumber(float64(data.(int)), buff)
-		case bool:
-			err = encodeBoolean(data.(bool), buff)
-		case map[string]interface{}:
-			if asEcmaArray {
-				err = encodeEcmaArray(data.(map[string]interface{}), buff)
-			} else {
-				err = encodeObject(data.(map[string]interface{}), buff)
-			}
-		case []interface {}:
-			m := make(map[string]interface{})
-			for i, d := range data.([]interface {}) {
-				k := fmt.Sprintf("%d", i)
-				m[k] = d
-			}
-			err = encodeEcmaArray(m, buff)
-		case nil:
-			err = encodeNull(buff)
-		case amf_t.SwitchToAmf3:
-			toAmf3 = true
-			err = encodeSwitchToAmf3(buff)
-		default:
-			log.Fatalf("amf0/encode %#v", data)
+	case string:
+		err = encodeString(data.(string), buff)
+	case float64:
+		err = encodeNumber(data.(float64), buff)
+	case int:
+		err = encodeNumber(float64(data.(int)), buff)
+	case bool:
+		err = encodeBoolean(data.(bool), buff)
+	case map[string]interface{}:
+		if asEcmaArray {
+			err = encodeEcmaArray(data.(map[string]interface{}), buff)
+		} else {
+			err = encodeObject(data.(map[string]interface{}), buff)
+		}
+	case []interface{}:
+		m := make(map[string]interface{})
+		for i, d := range data.([]interface{}) {
+			k := fmt.Sprintf("%d", i)
+			m[k] = d
+		}
+		err = encodeEcmaArray(m, buff)
+	case nil:
+		err = encodeNull(buff)
+	case amf_t.SwitchToAmf3:
+		toAmf3 = true
+		err = encodeSwitchToAmf3(buff)
+	default:
+		log.Fatalf("amf0/encode %#v", data)
 	}
 	return
 }
@@ -169,7 +170,7 @@ func Encode(data []interface{}, asEcmaArray bool) (b []byte, err error) {
 	return
 }
 
-type objectEnd struct {}
+type objectEnd struct{}
 
 func decodeString(rdr *bytes.Reader) (str string, err error) {
 	buf := make([]byte, 2)
@@ -224,10 +225,10 @@ func decodeObject(rdr *bytes.Reader) (res map[string]interface{}, err error) {
 		}
 		if key == "" {
 			switch val.(type) {
-				case objectEnd:
-					return
-				default:
-					log.Fatalf("decodeObject: parse error; Not object-end, %+s", val)
+			case objectEnd:
+				return
+			default:
+				log.Fatalf("decodeObject: parse error; Not object-end, %+s", val)
 			}
 		}
 		res[key] = val
@@ -262,46 +263,43 @@ func decodeStrictArray(rdr *bytes.Reader) (res []interface{}, err error) {
 	return
 }
 
-
 func decodeOne(rdr *bytes.Reader) (res interface{}, err error) {
 	buf := make([]byte, 1)
 	if _, err = io.ReadFull(rdr, buf); err != nil {
 		return
 	}
 	switch buf[0] {
-		case 0: // Number
-			res, err = decodeNumber(rdr)
-		case 1: // Boolean
-			res, err = decodeBoolean(rdr)
-		case 2: // String
-			res, err = decodeString(rdr)
-		case 3:
-			res, err = decodeObject(rdr)
-		case 5: // Null
-			res = nil
-		case 6: // undefined
-			res = nil
-		case 8: // ECMA Array
-			res, err = decodeEcmaArray(rdr)
+	case 0: // Number
+		res, err = decodeNumber(rdr)
+	case 1: // Boolean
+		res, err = decodeBoolean(rdr)
+	case 2: // String
+		res, err = decodeString(rdr)
+	case 3:
+		res, err = decodeObject(rdr)
+	case 5: // Null
+		res = nil
+	case 6: // undefined
+		res = nil
+	case 8: // ECMA Array
+		res, err = decodeEcmaArray(rdr)
 
-		case 9: // Object End
-			res = objectEnd{}
-		case 10:
-			res, err = decodeStrictArray(rdr)
-		case 0x11: // Switch to AMF3
-			dat, e := amf3.DecodeAll(rdr)
-			if e != nil {
-				err = e
-				return
-			}
-			res = amf_t.AMF3{Data: dat}
-		default:
-			err = fmt.Errorf("Not implemented: type=%d", buf[0])
+	case 9: // Object End
+		res = objectEnd{}
+	case 10:
+		res, err = decodeStrictArray(rdr)
+	case 0x11: // Switch to AMF3
+		dat, e := amf3.DecodeAll(rdr)
+		if e != nil {
+			err = e
+			return
+		}
+		res = amf_t.AMF3{Data: dat}
+	default:
+		err = fmt.Errorf("Not implemented: type=%d", buf[0])
 	}
 	return
 }
-
-
 
 func DecodeAll(rdr *bytes.Reader) (res []interface{}, err error) {
 	for rdr.Len() > 0 {
@@ -311,10 +309,10 @@ func DecodeAll(rdr *bytes.Reader) (res []interface{}, err error) {
 			return
 		}
 		switch re.(type) {
-			case amf_t.AMF3:
-				res = append(res, re.(amf_t.AMF3).Data...)
-			default:
-				res = append(res, re)
+		case amf_t.AMF3:
+			res = append(res, re.(amf_t.AMF3).Data...)
+		default:
+			res = append(res, re)
 		}
 	}
 	return

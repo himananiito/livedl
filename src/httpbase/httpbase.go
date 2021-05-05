@@ -1,23 +1,23 @@
 package httpbase
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"os"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"strings"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
 	"time"
-	"errors"
-	"encoding/json"
-	"encoding/pem"
-	"bytes"
 
-	"../buildno"
-	"../defines"
+	"github.com/himananiito/livedl/buildno"
+	"github.com/himananiito/livedl/defines"
 )
 
 func GetUserAgent() string {
@@ -64,7 +64,7 @@ func checkTLSClientConfig() bool {
 	return true
 }
 func SetRootCA(file string) (err error) {
-	if ! checkTLSClientConfig() {
+	if !checkTLSClientConfig() {
 		err = fmt.Errorf("SetRootCA: check failed")
 		return
 	}
@@ -125,7 +125,7 @@ func SetSkipVerify(skip bool) (err error) {
 	return
 }
 func SetProxy(rawurl string) (err error) {
-	if ! checkTransport() {
+	if !checkTransport() {
 		return fmt.Errorf("SetProxy(%#v): check failed", rawurl)
 	}
 

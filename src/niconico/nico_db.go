@@ -1,15 +1,15 @@
 package niconico
 
 import (
-	"fmt"
-	"time"
-	"os"
-	"log"
-	"strings"
 	"database/sql"
-
+	"fmt"
+	"log"
+	"os"
 	"path/filepath"
-	"../files"
+	"strings"
+	"time"
+
+	"github.com/himananiito/livedl/files"
 )
 
 var SelMedia = `SELECT
@@ -123,7 +123,6 @@ func (hls *NicoHls) dbCreate() (err error) {
 		return
 	}
 
-
 	// kvs media
 
 	_, err = hls.db.Exec(`
@@ -166,26 +165,26 @@ func (hls *NicoHls) dbGetLastPosition() (res float64) {
 
 //func (hls *NicoHls) __dbBegin() {
 //	return
-	///////////////////////////////////////////
-	//hls.db.Exec(`BEGIN TRANSACTION`)
+///////////////////////////////////////////
+//hls.db.Exec(`BEGIN TRANSACTION`)
 //}
 //func (hls *NicoHls) __dbCommit(t time.Time) {
 //	return
-	///////////////////////////////////////////
+///////////////////////////////////////////
 
-	//// Never hls.dbMtx.Lock()
-	//var start int64
-	//hls.db.Exec(`COMMIT; BEGIN TRANSACTION`)
-	//if t.UnixNano() - hls.lastCommit.UnixNano() > 500000000 {
-	//	log.Printf("Commit: %s\n", hls.dbName)
-	//}
-	//hls.lastCommit = t
+//// Never hls.dbMtx.Lock()
+//var start int64
+//hls.db.Exec(`COMMIT; BEGIN TRANSACTION`)
+//if t.UnixNano() - hls.lastCommit.UnixNano() > 500000000 {
+//	log.Printf("Commit: %s\n", hls.dbName)
+//}
+//hls.lastCommit = t
 //}
 func (hls *NicoHls) dbCommit() {
-//	hls.dbMtx.Lock()
-//	defer hls.dbMtx.Unlock()
+	//	hls.dbMtx.Lock()
+	//	defer hls.dbMtx.Unlock()
 
-//	hls.__dbCommit(time.Now())
+	//	hls.__dbCommit(time.Now())
 }
 func (hls *NicoHls) dbExec(query string, args ...interface{}) {
 	hls.dbMtx.Lock()
@@ -309,33 +308,33 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 	fmt.Fprintf(f, "%s\r\n", `<packet>`)
 
 	for rows.Next() {
-		var vpos      int64
-		var date      int64
+		var vpos int64
+		var date int64
 		var date_usec int64
-		var no        int64
+		var no int64
 		var anonymity int64
-		var user_id   string
-		var content   string
-		var mail      string
-		var premium   int64
-		var score     int64
-		var thread    int64
-		var origin    string
-		var locale    string
+		var user_id string
+		var content string
+		var mail string
+		var premium int64
+		var score int64
+		var thread int64
+		var origin string
+		var locale string
 		err = rows.Scan(
-			&vpos      ,
-			&date      ,
-			&date_usec ,
-			&no        ,
-			&anonymity ,
-			&user_id   ,
-			&content   ,
-			&mail      ,
-			&premium   ,
-			&score     ,
-			&thread    ,
-			&origin    ,
-			&locale    ,
+			&vpos,
+			&date,
+			&date_usec,
+			&no,
+			&anonymity,
+			&user_id,
+			&content,
+			&mail,
+			&premium,
+			&score,
+			&thread,
+			&origin,
+			&locale,
 		)
 		if err != nil {
 			log.Println(err)
@@ -347,7 +346,7 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 			continue
 		}
 
-		if (vpos < 0) {
+		if vpos < 0 {
 			continue
 		}
 

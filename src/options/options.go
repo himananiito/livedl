@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"../buildno"
-	"../cryptoconf"
-	"../files"
+	"github.com/himananiito/livedl/buildno"
+	"github.com/himananiito/livedl/cryptoconf"
+	"github.com/himananiito/livedl/files"
 	"golang.org/x/crypto/sha3"
 )
 

@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"../base"
+
+	"github.com/himananiito/livedl/procs/base"
 )
 
 var cmdList = []string{
@@ -15,7 +16,7 @@ var cmdList = []string{
 	"youtube-dl",
 }
 
-func Open(opt... string) (cmd *exec.Cmd, stdout, stderr io.ReadCloser, err error) {
+func Open(opt ...string) (cmd *exec.Cmd, stdout, stderr io.ReadCloser, err error) {
 	cmd, _, stdout, stderr, err = base.Open(&cmdList, false, true, true, false, opt)
 	if cmd == nil {
 		err = fmt.Errorf("youtube-dl not found")
