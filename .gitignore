@@ -1,4 +1,4 @@
-/testrec/
+/testrec/ 
 
 *.flv
 *.mp4
@@ -31,6 +31,9 @@
 *-journal
 *.sqlite3-shm
 *.sqlite3-wal
-
+Nico/*
 !changelog.txt
+*.orig
+lv*
+
 
