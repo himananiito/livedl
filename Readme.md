@@ -5,6 +5,22 @@
 https://himananiito.hatenablog.jp/entry/livedl
 を参照
 
+## Windowsでのビルド(exeを作成するためにDockerを利用)
+### Step1
+`docker-compose` が実行できるようにDocker Desktop for Windowsをインストールする。
+
+### Step2
+ターミナルで
+```
+build\windows
+```
+に移動する。
+
+### Step3
+```
+docker-compose up --build
+```
+を実行するとプロジェクトのトップディレクトリに `livedl.exe` が作成される。
 
 ## Linux(Ubuntu)でのビルド方法
 ```
@@ -15,11 +31,8 @@ VERSION="16.04.2 LTS (Xenial Xerus)"
 
 ### Go実行環境のインストール　（無い場合）
 ```
-wget https://dl.google.com/go/go1.10.3.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go1.10.3.linux-amd64.tar.gz
-export PATH=$PATH:/usr/local/go/bin
-# 必要であれば、bashrcなどにPATHを追加する
+https://golang.org/doc/install
+に従う
 ```
 
 ### gitをインストール　（無い場合）
@@ -30,14 +43,6 @@ sudo apt-get install git
 ### gccなどのビルドツールをインストール　（無い場合）
 ```
 sudo apt-get install build-essential
-```
-
-### 必要なgoのモジュールをインストール
-```
-go get github.com/gorilla/websocket
-go get golang.org/x/crypto/sha3
-go get github.com/mattn/go-sqlite3
-go get github.com/gin-gonic/gin
 ```
 
 ### livedlのソースを取得
@@ -52,17 +57,6 @@ git clone https://github.com/himananiito/livedl.git
 cd livedl
 ```
 
-#### (オプション)特定のバージョンを選択する場合
-```
-$ git tag
-20180513.6
-20180514.7
-...
-20180729.21
-20180807.22
-$ git checkout 20180729.21 （選んだバージョン）
-```
-
 #### (オプション)最新のコードをビルドする場合
 ```
 git checkout master
@@ -72,10 +66,6 @@ git checkout master
 ```
 go build src/livedl.go
 ```
-もし、cannot find package "github.com/gin-gonic/gin" in any of:
-
-など出る場合は、
-`go get github.com/gin-gonic/gin` (適宜読み替える)したのち`go build src/livedl.go`を再実行する
 
 ```
 ./livedl -h
@@ -112,7 +102,7 @@ go build -o livedl.x86.exe src/livedl.go
 
 `-http-skip-verify=on`
 
-## Dockerでビルド
+## コンテナで実行
 
 ### livedlのソースを取得
 ```
@@ -123,16 +113,15 @@ git checkout master # Or another version that supports docker (contains Dockerfi
 
 ### イメージ作成
 ```
-docker build -t <your_image_tag> .
+docker build -t livedl .
 ```
 
 ### イメージの使い方
 
 - 出力フォルダを/livedlにマウント
-- 通常のパラメーターに加えて`--no-chdir`を渡す
 
 ```
-docker run -it --rm -v ~/livedl:/livedl <your_image_tag> livedl --no-chdir <other_parameters> ...
+docker run --rm -it -v "$(pwd):/livedl" livedl "https://live.nicovideo.jp/watch/..."
 ```
 
 以上

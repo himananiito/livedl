@@ -1,0 +1,8 @@
+version: '3'
+services:
+  livedl-win:
+    build:
+      context: ../..
+      dockerfile: ./build/windows/Dockerfile
+    volumes:
+        - ../..:/mnt

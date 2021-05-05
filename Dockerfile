@@ -1,17 +1,13 @@
-FROM golang:1.11-alpine as builder
+FROM golang:1.16-alpine as builder
 
 RUN apk add --no-cache \
         build-base \
-        git && \
-    go get github.com/gorilla/websocket && \
-    go get golang.org/x/crypto/sha3 && \
-    go get github.com/mattn/go-sqlite3 && \
-    go get github.com/gin-gonic/gin
+        git
 
 COPY . /tmp/livedl
 
-RUN cd /tmp/livedl && \
-    go build src/livedl.go
+RUN cd /tmp/livedl/src && \
+    go build livedl.go
 
 
 
@@ -22,11 +18,10 @@ RUN apk add --no-cache \
         ffmpeg \
         openssl
 
-COPY --from=builder /tmp/livedl/livedl /usr/local/bin/
+COPY --from=builder /tmp/livedl/src/livedl /usr/local/bin/
 
 WORKDIR /livedl
 
 VOLUME /livedl
 
-CMD livedl
-
+ENTRYPOINT [ "livedl", "--no-chdir" ]
