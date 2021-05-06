@@ -334,8 +334,11 @@ func (hls *NicoHls) commentHandler(tag string, attr interface{}) (err error) {
 		return
 	}
 	//fmt.Printf("%#v\n", attrMap)
-	if vpos_f, ok := attrMap["vpos"].(float64); ok {
-		vpos := int64(vpos_f)
+	if tag == "chat" {
+		var vpos int64
+		if d, ok := attrMap["vpos"].(float64); ok {
+			vpos = int64(d)
+		}
 		var date int64
 		if d, ok := attrMap["date"].(float64); ok {
 			date = int64(d)
@@ -364,9 +367,9 @@ func (hls *NicoHls) commentHandler(tag string, attr interface{}) (err error) {
 		}
 
 		hls.dbInsert("comment", map[string]interface{}{
-			"vpos":      attrMap["vpos"],
-			"date":      attrMap["date"],
-			"date_usec": attrMap["date_usec"],
+			"vpos":      vpos,
+			"date":      date,
+			"date_usec": date_usec,
 			"date2":     date2,
 			"no":        attrMap["no"],
 			"anonymity": attrMap["anonymity"],
