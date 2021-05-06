@@ -26,6 +26,7 @@ var SelComment = `SELECT
 	user_id,
 	content,
 	IFNULL(mail, "") AS mail,
+	%s
 	IFNULL(premium, 0) AS premium,
 	IFNULL(score, 0) AS score,
 	thread,
@@ -120,6 +121,7 @@ func (hls *NicoHls) dbCreate() (err error) {
 		user_id   TEXT NOT NULL,
 		content   TEXT NOT NULL,
 		mail      TEXT,
+		name      TEXT,
 		premium   INTEGER,
 		score     INTEGER,
 		thread    TEXT,
@@ -300,7 +302,22 @@ func (hls *NicoHls) dbGetFromWhen() (res_from int, when float64) {
 
 func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 
-	rows, err := db.Query(SelComment)
+	var fSelComment = func(revision int) string {
+		var selAppend string
+		if revision >= 1 {
+			selAppend += `IFNULL(name, "") AS name,`
+		}
+		return fmt.Sprintf(SelComment, selAppend)
+	}
+
+	var commentRevision int
+	var nameCount int64
+	db.QueryRow(`SELECT COUNT(name) FROM pragma_table_info('comment') WHERE name = 'name'`).Scan(&nameCount)
+	if nameCount > 0 {
+		commentRevision = 1
+	}
+
+	rows, err := db.Query(fSelComment(commentRevision))
 	if err != nil {
 		log.Println(err)
 		return
@@ -334,12 +351,13 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 		var user_id string
 		var content string
 		var mail string
+		var name string
 		var premium int64
 		var score int64
 		var thread string
 		var origin string
 		var locale string
-		err = rows.Scan(
+		var dest0 = []interface{} {
 			&vpos,
 			&date,
 			&date_usec,
@@ -348,12 +366,19 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 			&user_id,
 			&content,
 			&mail,
+		}
+		var dest1 = []interface{} {
 			&premium,
 			&score,
 			&thread,
 			&origin,
 			&locale,
-		)
+		}
+		if commentRevision >= 1 {
+			dest0 = append(dest0, &name)
+		}
+		var dest = append(dest0, dest1...)
+		err = rows.Scan(dest...)
 		if err != nil {
 			log.Println(err)
 			return
@@ -388,6 +413,12 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 			mail = strings.Replace(mail, "&", "&amp;", -1)
 			mail = strings.Replace(mail, "<", "&lt;", -1)
 			line += fmt.Sprintf(` mail="%s"`, mail)
+		}
+		if name != "" {
+			name = strings.Replace(name, `"`, "&quot;", -1)
+			name = strings.Replace(name, "&", "&amp;", -1)
+			name = strings.Replace(name, "<", "&lt;", -1)
+			line += fmt.Sprintf(` name="%s"`, name)
 		}
 		if origin != "" {
 			origin = strings.Replace(origin, `"`, "&quot;", -1)
