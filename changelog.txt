@@ -1,5 +1,15 @@
 ﻿更新履歴
 
+20210524.37
+・2021/01/01までに5chで公開されたniconico関係の全てのパッチを適用
+
+・livedl で一部コメントが保存されないのを修正するパッチ
+https://egg.5ch.net/test/read.cgi/software/1595715643/457
+　vposが0またはdate_usecが0の場合その要素自体が存在しないのでエラーになりコメントが保存されないのを修正
+
+・Remove VPOS > 0 (Commit 03417972d920cce0af92221583fc42bc559ef469)
+　（VPOS<0のコメントが抜けるため削除した）
+
 ・livedl で HTTP のタイムアウト時間を変更できるようにするパッチ
 https://egg.5ch.net/test/read.cgi/software/1595715643/272
 
