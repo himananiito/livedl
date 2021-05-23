@@ -95,6 +95,9 @@ COMMAND:
   -tcas    ツイキャスの録画
   -yt      YouTube Liveの録画
   -d2m     録画済みのdb(.sqlite3)をmp4に変換する(-db-to-mp4)
+  -d2h     [実験的] 録画済みのdb(.sqlite3)を視聴するためのHLSサーバを立てる(-db-to-hls)
+           開始シーケンス番号は（変換ではないが） -nico-conv-seqno-start で指定
+           使用例：$ livedl lvXXXXXXXXX.sqlite3 -d2h -nico-hls-port 12345 -nico-conv-seqno-start 2780
 
 オプション/option:
   -h         ヘルプを表示
@@ -133,6 +136,11 @@ COMMAND:
   -nico-skip-hb=off              (+) コメント書き出し時に/hbコマンドも出す(デフォルト)
   -nico-ts-start <num>           タイムシフトの録画を指定した再生時間(秒)から開始する
   -nico-ts-start-min <num>       タイムシフトの録画を指定した再生時間(分)から開始する
+  -nico-conv-seqno-start <num>   MP4への変換を指定したセグメント番号から開始する
+  -nico-conv-seqno-end <num>     MP4への変換を指定したセグメント番号で終了する
+  -nico-conv-force-concat        MP4への変換で画質変更または抜けがあっても分割しないように設定
+  -nico-conv-force-concat=on     (+) 上記を有効に設定
+  -nico-conv-force-concat=off    (+) 上記を無効に設定(デフォルト)
 
 ツイキャス録画用オプション:
   -tcas-retry=on                 (+) 録画終了後に再試行を行う
