@@ -77,6 +77,7 @@ type NicoHls struct {
 
 	isTimeshift        bool
 	timeshiftStart     float64
+	timeshiftStop      int
 	fastTimeshift      bool
 	ultrafastTimeshift bool
 
@@ -279,6 +280,7 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		gmMain: gorman.WithChecker(func(c int) { hls.checkReturnCode(c) }),
 
 		timeshiftStart: opt.NicoTsStart,
+		timeshiftStop:  opt.NicoTsStop,
 	}
 
 	hls.fastTimeshiftOrig = hls.fastTimeshift
@@ -399,6 +401,7 @@ const (
 	MAIN_INVALID_STREAM_QUALITY
 	MAIN_TEMPORARILY_ERROR
 	PLAYLIST_END
+	TIMESHIFT_STOP
 	PLAYLIST_403
 	PLAYLIST_ERROR
 	DELAY
@@ -488,6 +491,20 @@ func (hls *NicoHls) markRestartMain(delay int) {
 }
 func (hls *NicoHls) checkReturnCode(code int) {
 	// NEVER restart goroutines here except interrupt handler
+	var fPlaylistEnd = func() {
+		hls.finish = true
+		if hls.isTimeshift {
+			if hls.commentDone {
+				hls.stopPCGoroutines()
+			} else if (! hls.getCommentStarted()) {
+				hls.stopPCGoroutines()
+			} else {
+				fmt.Println("waiting comment")
+			}
+		} else {
+			hls.stopPCGoroutines()
+		}
+	}
 	switch code {
 	case NETWORK_ERROR, MAIN_TEMPORARILY_ERROR:
 		delay := hls.getStartDelay()
@@ -516,18 +533,11 @@ func (hls *NicoHls) checkReturnCode(code int) {
 
 	case PLAYLIST_END:
 		fmt.Println("playlist end.")
-		hls.finish = true
-		if hls.isTimeshift {
-			if hls.commentDone {
-				hls.stopPCGoroutines()
-			} else if !hls.getCommentStarted() {
-				hls.stopPCGoroutines()
-			} else {
-				fmt.Println("waiting comment")
-			}
-		} else {
-			hls.stopPCGoroutines()
-		}
+		fPlaylistEnd()
+
+	case TIMESHIFT_STOP:
+		fmt.Println("timeshift stop.")
+		fPlaylistEnd()
 
 	case MAIN_WS_ERROR:
 		hls.stopPGoroutines()
@@ -1039,7 +1049,7 @@ func (hls *NicoHls) saveMedia(seqno int, uri string) (is403, is404, is500 bool, 
 	return
 }
 
-func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, neterr, err error) {
+func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, isStop, is500 bool, neterr, err error) {
 	u := argUri.String()
 	m3u8, code, millisec, err, neterr := getString(u)
 	if hls.nicoDebug {
@@ -1236,6 +1246,10 @@ func (hls *NicoHls) getPlaylist(argUri *url.URL) (is403, isEnd, is500 bool, nete
 		// prints Current SeqNo
 		if hls.isTimeshift {
 			sec := int(hls.playlist.position)
+			if hls.timeshiftStop != 0 && sec >= hls.timeshiftStop {
+				isStop = true
+				return
+			}
 			var pos string
 			if sec >= 3600 {
 				pos += fmt.Sprintf("%02d:%02d:%02d", sec/3600, (sec%3600)/60, sec%60)
@@ -1485,7 +1499,7 @@ func (hls *NicoHls) startPlaylist(uri string) {
 
 				//fmt.Println(uri)
 
-				is403, isEnd, is500, neterr, err := hls.getPlaylist(uri)
+				is403, isEnd, isStop, is500, neterr, err := hls.getPlaylist(uri)
 				if neterr != nil {
 					if !hls.interrupted() {
 						log.Println("playlist:", e)
@@ -1509,6 +1523,9 @@ func (hls *NicoHls) startPlaylist(uri string) {
 				}
 				if isEnd {
 					return PLAYLIST_END
+				}
+				if isStop {
+					return TIMESHIFT_STOP
 				}
 
 			case <-sig:
