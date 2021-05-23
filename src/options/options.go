@@ -137,6 +137,8 @@ COMMAND:
   -nico-skip-hb=off              (+) コメント書き出し時に/hbコマンドも出す(デフォルト)
   -nico-ts-start <num>           タイムシフトの録画を指定した再生時間(秒)から開始する
   -nico-ts-start-min <num>       タイムシフトの録画を指定した再生時間(分)から開始する
+  -nico-ts-start <num>           タイムシフトの録画を指定した再生時間(秒)から開始する
+  -nico-ts-start-min <num>       タイムシフトの録画を指定した再生時間(分)から開始する
   -nico-conv-seqno-start <num>   MP4への変換を指定したセグメント番号から開始する
   -nico-conv-seqno-end <num>     MP4への変換を指定したセグメント番号で終了する
   -nico-conv-force-concat        MP4への変換で画質変更または抜けがあっても分割しないように設定
@@ -172,7 +174,7 @@ HTTP関連
 
 FILE:
   ニコニコ生放送/nicolive:
-    http://live2.nicovideo.jp/watch/lvXXXXXXXXX
+    https://live.nicovideo.jp/watch/lvXXXXXXXXX
     lvXXXXXXXXX
   ツイキャス/twitcasting:
     https://twitcasting.tv/XXXXX
