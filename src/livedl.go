@@ -141,17 +141,17 @@ func main() {
 			os.Exit(1)
 		}
 		if hlsPlaylistEnd && opt.NicoAutoConvert {
-			done, nMp4s, err := zip2mp4.ConvertDB(dbname, opt.ConvExt, opt.NicoSkipHb)
+			done, nMp4s, skipped, err := zip2mp4.ConvertDB(dbname, opt.ConvExt, opt.NicoSkipHb, opt.NicoConvForceConcat, opt.NicoConvSeqnoStart, opt.NicoConvSeqnoEnd)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
 			if done {
-				if nMp4s == 1 {
+				if nMp4s == 1 && (! skipped) {
 					if 1 <= opt.NicoAutoDeleteDBMode {
 						os.Remove(dbname)
 					}
-				} else if 1 < nMp4s {
+				} else if 1 < nMp4s || (nMp4s == 1 && skipped) {
 					if 2 <= opt.NicoAutoDeleteDBMode {
 						os.Remove(dbname)
 					}
@@ -181,10 +181,20 @@ func main() {
 			}
 
 		} else {
-			if _, _, err := zip2mp4.ConvertDB(opt.DBFile, opt.ConvExt, opt.NicoSkipHb); err != nil {
+			if _, _, _, err := zip2mp4.ConvertDB(opt.DBFile, opt.ConvExt, opt.NicoSkipHb, opt.NicoConvForceConcat, opt.NicoConvSeqnoStart, opt.NicoConvSeqnoEnd); err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
+		}
+
+	case "DB2HLS":
+		if opt.NicoHlsPort == 0 {
+			fmt.Println("HLS port not specified")
+			os.Exit(1)
+		}
+		if err := zip2mp4.ReplayDB(opt.DBFile, opt.NicoHlsPort, opt.NicoConvSeqnoStart); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
 		}
 	}
 

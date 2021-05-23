@@ -34,6 +34,24 @@ var SelComment = `SELECT
 	FROM comment
 	ORDER BY date2`
 
+func SelMediaF(seqnoStart, seqnoEnd int64) (ret string) {
+	ret = `SELECT
+	seqno, bandwidth, size, data FROM media
+	WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL`
+
+	if seqnoStart > 0 {
+		ret += ` AND seqno >= ` + fmt.Sprint(seqnoStart)
+	}
+
+	if seqnoEnd > 0 {
+		ret += ` AND seqno <= ` + fmt.Sprint(seqnoEnd)
+	}
+
+	ret += ` ORDER BY seqno`
+
+	return
+}
+
 func (hls *NicoHls) dbOpen() (err error) {
 	db, err := sql.Open("sqlite3", hls.dbName)
 	if err != nil {
