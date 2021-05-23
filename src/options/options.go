@@ -44,6 +44,7 @@ type Option struct {
 	NicoHlsPort            int
 	NicoLimitBw            int
 	NicoTsStart            float64
+	NicoTsStop             int
 	NicoFormat             string
 	NicoFastTs             bool
 	NicoUltraFastTs        bool
@@ -400,6 +401,45 @@ func dbOpen() (db *sql.DB, err error) {
 	return
 }
 
+func parseTime(arg string) (ret int, err error) {
+	var hour, min, sec int
+
+	if m := regexp.MustCompile(`^(\d+):(\d+):(\d+)$`).FindStringSubmatch(arg); len(m) > 0 {
+		hour, err = strconv.Atoi(m[1])
+		if err != nil {
+			return
+		}
+		min, err = strconv.Atoi(m[2])
+		if err != nil {
+			return
+		}
+		sec, err = strconv.Atoi(m[3])
+		if err != nil {
+			return
+		}
+	} else if m := regexp.MustCompile(`^(\d+):(\d+)$`).FindStringSubmatch(arg); len(m) > 0 {
+		min, err = strconv.Atoi(m[1])
+		if err != nil {
+			return
+		}
+		sec, err = strconv.Atoi(m[2])
+		if err != nil {
+			return
+		}
+	} else if m := regexp.MustCompile(`^(\d+)$`).FindStringSubmatch(arg); len(m) > 0 {
+		sec, err = strconv.Atoi(m[1])
+		if err != nil {
+			return
+		}
+	} else {
+		err = fmt.Errorf("regexp not matched")
+	}
+
+	ret = hour * 3600 + min * 60 + sec
+
+	return
+}
+
 func ParseArgs() (opt Option) {
 	//dbAccountOpen()
 	db, err := dbOpen()
@@ -749,7 +789,7 @@ func ParseArgs() (opt Option) {
 			if err != nil {
 				return err
 			}
-			num, err := strconv.Atoi(s)
+			num, err := parseTime(s)
 			if err != nil {
 				return fmt.Errorf("--nico-ts-start: Not a number %s\n", s)
 			}
@@ -761,11 +801,35 @@ func ParseArgs() (opt Option) {
 			if err != nil {
 				return err
 			}
-			num, err := strconv.Atoi(s)
+			num, err := parseTime(s + ":0")
 			if err != nil {
 				return fmt.Errorf("--nico-ts-start-min: Not a number %s\n", s)
 			}
-			opt.NicoTsStart = float64(num * 60)
+			opt.NicoTsStart = float64(num)
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?ts-?stop\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := parseTime(s)
+			if err != nil {
+				return fmt.Errorf("--nico-ts-stop: Not a number %s\n", s)
+			}
+			opt.NicoTsStop = num
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?ts-?stop-?min\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := parseTime(s + ":0")
+			if err != nil {
+				return fmt.Errorf("--nico-ts-stop-min: Not a number %s\n", s)
+			}
+			opt.NicoTsStop = num
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?(?:format|fmt)\z`), func() (err error) {
