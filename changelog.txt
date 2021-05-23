@@ -1,5 +1,12 @@
 ﻿更新履歴
 
+20210524.37
+・2021/01/01までに5chで公開されたniconico関係の全てのパッチを適用
+
+・livedl で一部コメントが保存されないのを修正するパッチ
+https://egg.5ch.net/test/read.cgi/software/1595715643/457
+　vposが0またはdate_usecが0の場合その要素自体が存在しないのでエラーになりコメントが保存されないのを修正
+
 ・livedl で YouTube Live を扱えるようにするためのパッチ（リビジョン1）
 patch は livedl.youtube-r1.patch のみ適用
 https://egg.5ch.net/test/read.cgi/software/1595715643/402
