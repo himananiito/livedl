@@ -1,5 +1,23 @@
 ﻿更新履歴
 
+20210516.36
+・fix タイムシフト録画時に'getwaybackkey: waybackkey not found' と表示されコメントが保存されない(nnn-revo2012 PR#54)
+　- コメントサーバー仕様変更に対応(threadId、waybackkey廃止など)(2020/07/27)
+　　5chで公開されたID:jM/9Q+5+0作成のpatchを適用
+　　https://egg.5ch.net/test/read.cgi/software/1570634489/932
+　- livedl で waybackkey の取得方法を変更するパッチ
+　　https://egg.5ch.net/test/read.cgi/software/1595715643/424
+
+・ニコニコ仕様変更を反映（#49 5chボランティア (sangwon-jung-work PR#51)
+　- 放送情報取得時のwebsocketプロトコルが変わって録画できなくなったのを修正(2020/06/02)
+　　5chで公開されたID:jM/9Q+5+0作成のpatchを適用
+　　http://egg.5ch.net/test/read.cgi/software/1570634489/535
+　- fix broadcastId not found error, add debug log
+
+・20181215.35以降の修正を追加
+・TS録画時にセグメント抜けが起こるのを修正 (PR#47)
+・http -> httpsに修正 (PR#39)
+
 20181215.35
 ・-nico-ts-start-minオプションの追加
 ・win32bit版のビルドを追加
