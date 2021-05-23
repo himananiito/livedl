@@ -52,6 +52,9 @@ type Option struct {
 	NicoDebug              bool // デバッグ情報の記録
 	ConvExt                string
 	ExtractChunks          bool
+	NicoConvForceConcat    bool
+	NicoConvSeqnoStart     int64
+	NicoConvSeqnoEnd       int64
 	NicoForceResv          bool // 終了番組の上書きタイムシフト予約
 	YtNoStreamlink         bool
 	YtNoYoutubeDl          bool
@@ -414,6 +417,7 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryInterval"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "ConvExt"), ""),
 		IFNULL((SELECT v FROM conf WHERE k == "ExtractChunks"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoConvForceConcat"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoForceResv"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "YtNoStreamlink"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "YtNoYoutubeDl"), 0),
@@ -434,6 +438,7 @@ func ParseArgs() (opt Option) {
 		&opt.TcasRetryInterval,
 		&opt.ConvExt,
 		&opt.ExtractChunks,
+		&opt.NicoConvForceConcat,
 		&opt.NicoForceResv,
 		&opt.YtNoStreamlink,
 		&opt.YtNoYoutubeDl,
@@ -588,6 +593,10 @@ func ParseArgs() (opt Option) {
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?(?:d|db|sqlite3?)-?(?:2|to)-?(?:m|mp4)\z`), func() error {
 			opt.Command = "DB2MP4"
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?(?:d|db|sqlite3?)-?(?:2|to)-?(?:h|hls)\z`), func() error {
+			opt.Command = "DB2HLS"
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?login-?only(?:=(on|off))?\z`), func() error {
@@ -849,6 +858,8 @@ func ParseArgs() (opt Option) {
 			case "", "DB2MP4":
 				opt.Command = "DB2MP4"
 				opt.DBFile = match[0]
+			case "DB2HLS":
+				opt.DBFile = match[0]
 			default:
 				return fmt.Errorf("%s: Use -- option before \"%s\"", opt.Command, match[0])
 			}
@@ -870,6 +881,48 @@ func ParseArgs() (opt Option) {
 				opt.ExtractChunks = false
 			}
 			dbConfSet(db, "ExtractChunks", opt.ExtractChunks)
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?conv-?force-?concat(?:=(on|off))?\z`), func() error {
+			if strings.EqualFold(match[1], "on") {
+				opt.NicoConvForceConcat = true
+				dbConfSet(db, "NicoConvForceConcat", opt.NicoConvForceConcat)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.NicoConvForceConcat = false
+				dbConfSet(db, "NicoConvForceConcat", opt.NicoConvForceConcat)
+			} else {
+				opt.NicoConvForceConcat = true
+			}
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?conv-?seqno-?start\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--nico-conv-seqno-start: Not a number: %s\n", s)
+			}
+			if num < 0 {
+				return fmt.Errorf("--nico-conv-seqno-start: Invalid: %d: must be greater than or equal to 0\n", num)
+			}
+			opt.NicoConvSeqnoStart = int64(num)
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?conv-?seqno-?end\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--nico-conv-seqno-end: Not a number: %s\n", s)
+			}
+			if num < 0 {
+				return fmt.Errorf("--nico-conv-seqno-end: Invalid: %d: must be greater than or equal to 0\n", num)
+			}
+			opt.NicoConvSeqnoEnd = int64(num)
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?force-?(?:re?sv|reservation)(?:=(on|off))\z`), func() error {
@@ -1001,7 +1054,7 @@ func ParseArgs() (opt Option) {
 				opt.ZipFile = arg
 				return true
 			}
-		case "DB2MP4":
+		case "DB2MP4", "DB2HLS":
 			if ma := regexp.MustCompile(`(?i)\.sqlite3`).FindStringSubmatch(arg); len(ma) > 0 {
 				opt.DBFile = arg
 				return true
@@ -1081,6 +1134,7 @@ LB_ARG:
 		if opt.NicoAutoConvert {
 			fmt.Printf("Conf(NicoAutoDeleteDBMode): %#v\n", opt.NicoAutoDeleteDBMode)
 			fmt.Printf("Conf(ExtractChunks): %#v\n", opt.ExtractChunks)
+			fmt.Printf("Conf(NicoConvForceConcat): %#v\n", opt.NicoConvForceConcat)
 			fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
 		}
 		fmt.Printf("Conf(NicoForceResv): %#v\n", opt.NicoForceResv)
@@ -1096,7 +1150,11 @@ LB_ARG:
 		fmt.Printf("Conf(TcasRetryInterval): %#v\n", opt.TcasRetryInterval)
 	case "DB2MP4":
 		fmt.Printf("Conf(ExtractChunks): %#v\n", opt.ExtractChunks)
+		fmt.Printf("Conf(NicoConvForceConcat): %#v\n", opt.NicoConvForceConcat)
 		fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
+	case "DB2HLS":
+		fmt.Printf("Conf(NicoHlsPort): %#v\n", opt.NicoHlsPort)
+		fmt.Printf("Conf(NicoConvSeqnoStart): %#v\n", opt.NicoConvSeqnoStart)
 	}
 	fmt.Printf("Conf(HttpSkipVerify): %#v\n", opt.HttpSkipVerify)
 
@@ -1126,7 +1184,7 @@ LB_ARG:
 		if opt.ZipFile == "" {
 			Help()
 		}
-	case "DB2MP4":
+	case "DB2MP4", "DB2HLS":
 		if opt.DBFile == "" {
 			Help()
 		}

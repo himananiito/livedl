@@ -1800,23 +1800,51 @@ func (hls *NicoHls) serve(hlsPort int) {
 		router := gin.Default()
 
 		router.GET("", func(c *gin.Context) {
-			seqno := hls.dbGetLastSeqNo()
+			c.Redirect(http.StatusMovedPermanently, "/m3u8/2/0/index.m3u8")
+			c.Abort()
+		})
+
+		router.GET("/m3u8/:delay/:shift/index.m3u8", func(c *gin.Context) {
+			targetDuration := "2"
+			extInf := "1.5"
+			if hls.isTimeshift {
+				targetDuration = "3"
+				extInf = "3.0"
+			}
+			shift, err := strconv.Atoi(c.Param("shift"))
+			if err != nil {
+				shift = 0
+			}
+			if shift < 0 {
+				shift = 0
+			}
+			delay, err := strconv.Atoi(c.Param("delay"))
+			if err != nil {
+				delay = 0
+			}
+			if delay < 2 {
+				delay = 2
+			}
+			if (! hls.isTimeshift) {
+				if delay < 4 {
+					delay = 4
+				}
+			}
+			seqno := hls.dbGetLastSeqNo() - int64(shift)
 			body := fmt.Sprintf(
 				`#EXTM3U
 #EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:1
+#EXT-X-TARGETDURATION:%s
 #EXT-X-MEDIA-SEQUENCE:%d
 
-#EXTINF:1.0,
+`, targetDuration, seqno)
+			for i := int64(delay); i >= 0; i-- {
+				body += fmt.Sprintf(
+`#EXTINF:%s,
 /ts/%d/test.ts
 
-#EXTINF:1.0,
-/ts/%d/test.ts
-
-#EXTINF:1.0,
-/ts/%d/test.ts
-
-`, seqno-2, seqno-2, seqno-1, seqno)
+`, extInf, seqno - i)
+			}
 			c.Data(http.StatusOK, "application/x-mpegURL", []byte(body))
 			return
 		})
