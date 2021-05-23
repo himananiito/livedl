@@ -10,12 +10,17 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
 
 	"github.com/himananiito/livedl/buildno"
 	"github.com/himananiito/livedl/cryptoconf"
 	"github.com/himananiito/livedl/files"
+	"github.com/himananiito/livedl/httpbase"
 	"golang.org/x/crypto/sha3"
 )
+
+const MinimumHttpTimeout = 5
 
 var DefaultTcasRetryTimeoutMinute = 5 // TcasRetryTimeoutMinute
 var DefaultTcasRetryInterval = 60     // TcasRetryInterval
@@ -64,6 +69,8 @@ type Option struct {
 	HttpSkipVerify         bool
 	HttpProxy              string
 	NoChdir                bool
+	HttpTimeout            int
+
 }
 
 func getCmd() (cmd string) {
@@ -1091,6 +1098,21 @@ func ParseArgs() (opt Option) {
 			opt.NoChdir = true
 			return
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?http-?timeout\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--http-timeout: Not a number: %s\n", s)
+			}
+			if num < MinimumHttpTimeout {
+				return fmt.Errorf("--http-timeout: Invalid: %d: must be greater than or equal to %#v\n", num, MinimumHttpTimeout)
+			}
+			opt.HttpTimeout = num
+			return nil
+		}},
 	}
 
 	checkFILE := func(arg string) bool {
@@ -1176,6 +1198,11 @@ LB_ARG:
 		opt.ConfFile = fmt.Sprintf("%s.conf", getCmd())
 	}
 
+	if opt.HttpTimeout == 0 {
+		opt.HttpTimeout = MinimumHttpTimeout
+	}
+	httpbase.Client.Timeout = time.Duration(opt.HttpTimeout) * time.Second
+
 	// [deprecated]
 	// load session info
 	if data, e := cryptoconf.Load(opt.ConfFile, opt.ConfPass); e != nil {
@@ -1231,6 +1258,7 @@ LB_ARG:
 		fmt.Printf("Conf(NicoConvSeqnoStart): %#v\n", opt.NicoConvSeqnoStart)
 	}
 	fmt.Printf("Conf(HttpSkipVerify): %#v\n", opt.HttpSkipVerify)
+	fmt.Printf("Conf(HttpTimeout): %#v\n", opt.HttpTimeout)
 
 	if opt.NicoDebug {
 		fmt.Printf("Conf(NicoDebug): %#v\n", opt.NicoDebug)
