@@ -1,5 +1,10 @@
 ﻿更新履歴
 
+・XMLコメントのname属性(出演者が名前付きのコメントする時に使用)を保存するように修正
+https://egg.5ch.net/test/read.cgi/software/1595715643/174
+patch は livedl.comment-name-attribute-r1.patch.gz のみ適用
+https://egg.5ch.net/test/read.cgi/software/1595715643/194
+
 ・指定時間でタイムシフト録画を停止するためのパッチ（＋α）
 https://egg.5ch.net/test/read.cgi/software/1595715643/163
 
