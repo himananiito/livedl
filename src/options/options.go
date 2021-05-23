@@ -175,6 +175,7 @@ Youtube live録画用オプション:
 HTTP関連
   -http-skip-verify=on           (+) TLS証明書の認証をスキップする (32bit版対策)
   -http-skip-verify=off          (+) TLS証明書の認証をスキップしない (デフォルト)
+  -http-timeout <num>            タイムアウト時間（秒）デフォルト: 5秒（最低値）
 
 
 (+)のついたオプションは、次回も同じ設定が使用されることを示す。
