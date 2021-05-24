@@ -10,12 +10,17 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
 
 	"github.com/himananiito/livedl/buildno"
 	"github.com/himananiito/livedl/cryptoconf"
 	"github.com/himananiito/livedl/files"
+	"github.com/himananiito/livedl/httpbase"
 	"golang.org/x/crypto/sha3"
 )
+
+const MinimumHttpTimeout = 5
 
 var DefaultTcasRetryTimeoutMinute = 5 // TcasRetryTimeoutMinute
 var DefaultTcasRetryInterval = 60     // TcasRetryInterval
@@ -44,6 +49,7 @@ type Option struct {
 	NicoHlsPort            int
 	NicoLimitBw            int
 	NicoTsStart            float64
+	NicoTsStop             int
 	NicoFormat             string
 	NicoFastTs             bool
 	NicoUltraFastTs        bool
@@ -52,6 +58,9 @@ type Option struct {
 	NicoDebug              bool // デバッグ情報の記録
 	ConvExt                string
 	ExtractChunks          bool
+	NicoConvForceConcat    bool
+	NicoConvSeqnoStart     int64
+	NicoConvSeqnoEnd       int64
 	NicoForceResv          bool // 終了番組の上書きタイムシフト予約
 	YtNoStreamlink         bool
 	YtNoYoutubeDl          bool
@@ -60,6 +69,8 @@ type Option struct {
 	HttpSkipVerify         bool
 	HttpProxy              string
 	NoChdir                bool
+	HttpTimeout            int
+
 }
 
 func getCmd() (cmd string) {
@@ -92,6 +103,9 @@ COMMAND:
   -tcas    ツイキャスの録画
   -yt      YouTube Liveの録画
   -d2m     録画済みのdb(.sqlite3)をmp4に変換する(-db-to-mp4)
+  -d2h     [実験的] 録画済みのdb(.sqlite3)を視聴するためのHLSサーバを立てる(-db-to-hls)
+           開始シーケンス番号は（変換ではないが） -nico-conv-seqno-start で指定
+           使用例：$ livedl lvXXXXXXXXX.sqlite3 -d2h -nico-hls-port 12345 -nico-conv-seqno-start 2780
 
 オプション/option:
   -h         ヘルプを表示
@@ -130,6 +144,13 @@ COMMAND:
   -nico-skip-hb=off              (+) コメント書き出し時に/hbコマンドも出す(デフォルト)
   -nico-ts-start <num>           タイムシフトの録画を指定した再生時間(秒)から開始する
   -nico-ts-start-min <num>       タイムシフトの録画を指定した再生時間(分)から開始する
+  -nico-ts-start <num>           タイムシフトの録画を指定した再生時間(秒)から開始する
+  -nico-ts-start-min <num>       タイムシフトの録画を指定した再生時間(分)から開始する
+  -nico-conv-seqno-start <num>   MP4への変換を指定したセグメント番号から開始する
+  -nico-conv-seqno-end <num>     MP4への変換を指定したセグメント番号で終了する
+  -nico-conv-force-concat        MP4への変換で画質変更または抜けがあっても分割しないように設定
+  -nico-conv-force-concat=on     (+) 上記を有効に設定
+  -nico-conv-force-concat=off    (+) 上記を無効に設定(デフォルト)
 
 ツイキャス録画用オプション:
   -tcas-retry=on                 (+) 録画終了後に再試行を行う
@@ -154,13 +175,14 @@ Youtube live録画用オプション:
 HTTP関連
   -http-skip-verify=on           (+) TLS証明書の認証をスキップする (32bit版対策)
   -http-skip-verify=off          (+) TLS証明書の認証をスキップしない (デフォルト)
+  -http-timeout <num>            タイムアウト時間（秒）デフォルト: 5秒（最低値）
 
 
 (+)のついたオプションは、次回も同じ設定が使用されることを示す。
 
 FILE:
   ニコニコ生放送/nicolive:
-    http://live2.nicovideo.jp/watch/lvXXXXXXXXX
+    https://live.nicovideo.jp/watch/lvXXXXXXXXX
     lvXXXXXXXXX
   ツイキャス/twitcasting:
     https://twitcasting.tv/XXXXX
@@ -389,6 +411,45 @@ func dbOpen() (db *sql.DB, err error) {
 	return
 }
 
+func parseTime(arg string) (ret int, err error) {
+	var hour, min, sec int
+
+	if m := regexp.MustCompile(`^(\d+):(\d+):(\d+)$`).FindStringSubmatch(arg); len(m) > 0 {
+		hour, err = strconv.Atoi(m[1])
+		if err != nil {
+			return
+		}
+		min, err = strconv.Atoi(m[2])
+		if err != nil {
+			return
+		}
+		sec, err = strconv.Atoi(m[3])
+		if err != nil {
+			return
+		}
+	} else if m := regexp.MustCompile(`^(\d+):(\d+)$`).FindStringSubmatch(arg); len(m) > 0 {
+		min, err = strconv.Atoi(m[1])
+		if err != nil {
+			return
+		}
+		sec, err = strconv.Atoi(m[2])
+		if err != nil {
+			return
+		}
+	} else if m := regexp.MustCompile(`^(\d+)$`).FindStringSubmatch(arg); len(m) > 0 {
+		sec, err = strconv.Atoi(m[1])
+		if err != nil {
+			return
+		}
+	} else {
+		err = fmt.Errorf("regexp not matched")
+	}
+
+	ret = hour * 3600 + min * 60 + sec
+
+	return
+}
+
 func ParseArgs() (opt Option) {
 	//dbAccountOpen()
 	db, err := dbOpen()
@@ -414,6 +475,7 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "TcasRetryInterval"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "ConvExt"), ""),
 		IFNULL((SELECT v FROM conf WHERE k == "ExtractChunks"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "NicoConvForceConcat"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoForceResv"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "YtNoStreamlink"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "YtNoYoutubeDl"), 0),
@@ -434,6 +496,7 @@ func ParseArgs() (opt Option) {
 		&opt.TcasRetryInterval,
 		&opt.ConvExt,
 		&opt.ExtractChunks,
+		&opt.NicoConvForceConcat,
 		&opt.NicoForceResv,
 		&opt.YtNoStreamlink,
 		&opt.YtNoYoutubeDl,
@@ -590,6 +653,10 @@ func ParseArgs() (opt Option) {
 			opt.Command = "DB2MP4"
 			return nil
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?(?:d|db|sqlite3?)-?(?:2|to)-?(?:h|hls)\z`), func() error {
+			opt.Command = "DB2HLS"
+			return nil
+		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?login-?only(?:=(on|off))?\z`), func() error {
 			if strings.EqualFold(match[1], "on") {
 				opt.NicoLoginOnly = true
@@ -732,7 +799,7 @@ func ParseArgs() (opt Option) {
 			if err != nil {
 				return err
 			}
-			num, err := strconv.Atoi(s)
+			num, err := parseTime(s)
 			if err != nil {
 				return fmt.Errorf("--nico-ts-start: Not a number %s\n", s)
 			}
@@ -744,11 +811,35 @@ func ParseArgs() (opt Option) {
 			if err != nil {
 				return err
 			}
-			num, err := strconv.Atoi(s)
+			num, err := parseTime(s + ":0")
 			if err != nil {
 				return fmt.Errorf("--nico-ts-start-min: Not a number %s\n", s)
 			}
-			opt.NicoTsStart = float64(num * 60)
+			opt.NicoTsStart = float64(num)
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?ts-?stop\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := parseTime(s)
+			if err != nil {
+				return fmt.Errorf("--nico-ts-stop: Not a number %s\n", s)
+			}
+			opt.NicoTsStop = num
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?ts-?stop-?min\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := parseTime(s + ":0")
+			if err != nil {
+				return fmt.Errorf("--nico-ts-stop-min: Not a number %s\n", s)
+			}
+			opt.NicoTsStop = num
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?(?:format|fmt)\z`), func() (err error) {
@@ -849,6 +940,8 @@ func ParseArgs() (opt Option) {
 			case "", "DB2MP4":
 				opt.Command = "DB2MP4"
 				opt.DBFile = match[0]
+			case "DB2HLS":
+				opt.DBFile = match[0]
 			default:
 				return fmt.Errorf("%s: Use -- option before \"%s\"", opt.Command, match[0])
 			}
@@ -870,6 +963,48 @@ func ParseArgs() (opt Option) {
 				opt.ExtractChunks = false
 			}
 			dbConfSet(db, "ExtractChunks", opt.ExtractChunks)
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?conv-?force-?concat(?:=(on|off))?\z`), func() error {
+			if strings.EqualFold(match[1], "on") {
+				opt.NicoConvForceConcat = true
+				dbConfSet(db, "NicoConvForceConcat", opt.NicoConvForceConcat)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.NicoConvForceConcat = false
+				dbConfSet(db, "NicoConvForceConcat", opt.NicoConvForceConcat)
+			} else {
+				opt.NicoConvForceConcat = true
+			}
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?conv-?seqno-?start\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--nico-conv-seqno-start: Not a number: %s\n", s)
+			}
+			if num < 0 {
+				return fmt.Errorf("--nico-conv-seqno-start: Invalid: %d: must be greater than or equal to 0\n", num)
+			}
+			opt.NicoConvSeqnoStart = int64(num)
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?nico-?conv-?seqno-?end\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--nico-conv-seqno-end: Not a number: %s\n", s)
+			}
+			if num < 0 {
+				return fmt.Errorf("--nico-conv-seqno-end: Invalid: %d: must be greater than or equal to 0\n", num)
+			}
+			opt.NicoConvSeqnoEnd = int64(num)
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?force-?(?:re?sv|reservation)(?:=(on|off))\z`), func() error {
@@ -964,6 +1099,21 @@ func ParseArgs() (opt Option) {
 			opt.NoChdir = true
 			return
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?http-?timeout\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := strconv.Atoi(s)
+			if err != nil {
+				return fmt.Errorf("--http-timeout: Not a number: %s\n", s)
+			}
+			if num < MinimumHttpTimeout {
+				return fmt.Errorf("--http-timeout: Invalid: %d: must be greater than or equal to %#v\n", num, MinimumHttpTimeout)
+			}
+			opt.HttpTimeout = num
+			return nil
+		}},
 	}
 
 	checkFILE := func(arg string) bool {
@@ -1001,7 +1151,7 @@ func ParseArgs() (opt Option) {
 				opt.ZipFile = arg
 				return true
 			}
-		case "DB2MP4":
+		case "DB2MP4", "DB2HLS":
 			if ma := regexp.MustCompile(`(?i)\.sqlite3`).FindStringSubmatch(arg); len(ma) > 0 {
 				opt.DBFile = arg
 				return true
@@ -1049,6 +1199,11 @@ LB_ARG:
 		opt.ConfFile = fmt.Sprintf("%s.conf", getCmd())
 	}
 
+	if opt.HttpTimeout == 0 {
+		opt.HttpTimeout = MinimumHttpTimeout
+	}
+	httpbase.Client.Timeout = time.Duration(opt.HttpTimeout) * time.Second
+
 	// [deprecated]
 	// load session info
 	if data, e := cryptoconf.Load(opt.ConfFile, opt.ConfPass); e != nil {
@@ -1081,6 +1236,7 @@ LB_ARG:
 		if opt.NicoAutoConvert {
 			fmt.Printf("Conf(NicoAutoDeleteDBMode): %#v\n", opt.NicoAutoDeleteDBMode)
 			fmt.Printf("Conf(ExtractChunks): %#v\n", opt.ExtractChunks)
+			fmt.Printf("Conf(NicoConvForceConcat): %#v\n", opt.NicoConvForceConcat)
 			fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
 		}
 		fmt.Printf("Conf(NicoForceResv): %#v\n", opt.NicoForceResv)
@@ -1096,9 +1252,14 @@ LB_ARG:
 		fmt.Printf("Conf(TcasRetryInterval): %#v\n", opt.TcasRetryInterval)
 	case "DB2MP4":
 		fmt.Printf("Conf(ExtractChunks): %#v\n", opt.ExtractChunks)
+		fmt.Printf("Conf(NicoConvForceConcat): %#v\n", opt.NicoConvForceConcat)
 		fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
+	case "DB2HLS":
+		fmt.Printf("Conf(NicoHlsPort): %#v\n", opt.NicoHlsPort)
+		fmt.Printf("Conf(NicoConvSeqnoStart): %#v\n", opt.NicoConvSeqnoStart)
 	}
 	fmt.Printf("Conf(HttpSkipVerify): %#v\n", opt.HttpSkipVerify)
+	fmt.Printf("Conf(HttpTimeout): %#v\n", opt.HttpTimeout)
 
 	if opt.NicoDebug {
 		fmt.Printf("Conf(NicoDebug): %#v\n", opt.NicoDebug)
@@ -1126,7 +1287,7 @@ LB_ARG:
 		if opt.ZipFile == "" {
 			Help()
 		}
-	case "DB2MP4":
+	case "DB2MP4", "DB2HLS":
 		if opt.DBFile == "" {
 			Help()
 		}
