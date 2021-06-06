@@ -129,7 +129,7 @@ func main() {
 		}
 
 	case "YOUTUBE":
-		err := youtube.Record(opt.YoutubeId, opt.YtNoStreamlink, opt.YtNoYoutubeDl)
+		err := youtube.Record(opt.YoutubeId, opt.YtNoStreamlink, opt.YtNoYoutubeDl, opt.YtCommentStart)
 		if err != nil {
 			fmt.Println(err)
 		}

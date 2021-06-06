@@ -63,6 +63,7 @@ type Option struct {
 	NicoConvSeqnoEnd       int64
 	NicoForceResv          bool // 終了番組の上書きタイムシフト予約
 	YtNoStreamlink         bool
+	YtCommentStart         float64
 	YtNoYoutubeDl          bool
 	NicoSkipHb             bool // コメント出力時に/hbコマンドを出さない
 	HttpRootCA             string
@@ -1049,6 +1050,18 @@ func ParseArgs() (opt Option) {
 			} else {
 				opt.YtNoYoutubeDl = true
 			}
+			return nil
+		}},
+		Parser{regexp.MustCompile(`\A(?i)--?yt-?comment-?start\z`), func() (err error) {
+			s, err := nextArg()
+			if err != nil {
+				return err
+			}
+			num, err := parseTime(s)
+			if err != nil {
+				return fmt.Errorf("--yt-comment-start: Not a number %s\n", s)
+			}
+			opt.YtCommentStart = float64(num)
 			return nil
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?skip-?hb(?:=(on|off))?\z`), func() (err error) {

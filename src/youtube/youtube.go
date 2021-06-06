@@ -299,7 +299,7 @@ func execYoutube_dl(gm *gorman.GoroutineManager, uri, name string) (err error) {
 
 var COMMENT_DONE = 1000
 
-func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
+func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool, ytCommentStart float64) (err error) {
 
 	uri := fmt.Sprintf("https://www.youtube.com/watch?v=%s", id)
 	code, buff, err, neterr := httpbase.GetBytes(uri, map[string]string{
@@ -390,7 +390,7 @@ func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
 
 	if continuation != "" {
 		gmCom.Go(func(c <-chan struct{}) int {
-			getComment(gmCom, ctx, c, isReplay, continuation, origName)
+			getComment(gmCom, ctx, c, isReplay, ytCommentStart, continuation, origName)
 			fmt.Printf("\ncomment done\n")
 			return COMMENT_DONE
 		})
