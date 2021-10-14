@@ -45,16 +45,35 @@ func main() {
 		baseDir = filepath.Dir(pa)
 	}
 
-	opt := options.ParseArgs()
+	// check option only -no-chdir
+	args := os.Args[1:]
+	nochdir := false
+	r := regexp.MustCompile(`\A(?i)--?no-?chdir\z`)
+	for _, s := range args {
+		if r.MatchString(s) {
+			nochdir = true
+			break
+		}
+	}
 
 	// chdir if not disabled
-	if !opt.NoChdir {
+	if !nochdir {
 		fmt.Printf("chdir: %s\n", baseDir)
 		if e := os.Chdir(baseDir); e != nil {
 			fmt.Println(e)
 			return
 		}
+	} else {
+		fmt.Printf("no chdir\n")
+		pwd, e := os.Getwd()
+		if e != nil {
+			fmt.Println(e)
+			return
+		}
+		fmt.Printf("read %s\n", filepath.FromSlash(pwd+"/conf.db"))
 	}
+
+	opt := options.ParseArgs()
 
 	// http
 	if opt.HttpRootCA != "" {
