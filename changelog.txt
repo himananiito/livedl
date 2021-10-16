@@ -1,5 +1,14 @@
 ﻿更新履歴
 
+20211017.39
+・livedlのあるディレクトリ以外から実行する時カレントディレクトリにconf.dbが作成されるのを修正
+https://egg.5ch.net/test/read.cgi/software/1595715643/922
+例: C:\bin\livedl\livedl.exe を D:\home\tmp をカレントディレクトリとして実行した場合、conf.dbは D:\home\tmp に作成されてしまう
+
+仕様：conf.dbは実行するlivedlと同じディレクトリに作成する
+      ただし、オプション -no-chdir が指定された場合はカレントディレクトリにconf.dbを作成する
+      (livedl実行ファイルがユーザ書き込み権限のないディレクトリにある場合を想定)
+
 20210607.38
 ・livedl で YouTube Live のアーカイブコメントの取得開始時刻を指定するオプション
 https://egg.5ch.net/test/read.cgi/software/1595715643/789
