@@ -701,7 +701,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId, waybackkey string) 
 			conn, _, err := websocket.DefaultDialer.Dial(
 				messageServerUri,
 				map[string][]string{
-					"Origin":                 []string{"https://live2.nicovideo.jp"},
+					"Origin":                 []string{"https://live.nicovideo.jp"},
 					"Sec-WebSocket-Protocol": []string{"msg.nicovideo.jp#json"},
 					"User-Agent":             []string{httpbase.GetUserAgent()},
 				},
@@ -2047,7 +2047,7 @@ func getProps(opt options.Option) (props interface{}, isFlash, notLogin, tsRsv0,
 		header["Cookie"] = "user_session=" + opt.NicoSession
 	}
 
-	uri := fmt.Sprintf("https://live2.nicovideo.jp/watch/%s", opt.NicoLiveId)
+	uri := fmt.Sprintf("https://live.nicovideo.jp/watch/%s", opt.NicoLiveId)
 	dat, _, _, err, neterr := getStringHeader(uri, header)
 	if err != nil || neterr != nil {
 		if err == nil {
