@@ -1,5 +1,11 @@
 ﻿更新履歴
 
+2022xxxx.xx
+・音声のみ録画対応
+　-nico-limit-bw に sound_only または audio_high を指定してください
+・-http-timeout の設定を保存するように修正
+・live2.* -> live.* に修正
+
 20211017.39
 ・livedlのあるディレクトリ以外から実行する時カレントディレクトリにconf.dbが作成されるのを修正
 https://egg.5ch.net/test/read.cgi/software/1595715643/922

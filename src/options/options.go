@@ -47,7 +47,7 @@ type Option struct {
 	ZipFile                string
 	DBFile                 string
 	NicoHlsPort            int
-	NicoLimitBw            int
+	NicoLimitBw            string
 	NicoTsStart            float64
 	NicoTsStop             int
 	NicoFormat             string
@@ -130,6 +130,7 @@ COMMAND:
   -nico-rtmp-index <num>[,<num>] RTMP録画を行うメディアファイルの番号を指定
   -nico-hls-port <portnum>       [実験的] ローカルなHLSサーバのポート番号
   -nico-limit-bw <bandwidth>     (+) HLSのBANDWIDTHの上限値を指定する。0=制限なし
+                                 sound_only or audio_high = 音声のみ
   -nico-format "FORMAT"          (+) 保存時のファイル名を指定する
   -nico-fast-ts                  倍速タイムシフト録画を行う(新配信タイムシフト)
   -nico-fast-ts=on               (+) 上記を有効に設定
@@ -179,7 +180,7 @@ Youtube live録画用オプション:
 HTTP関連
   -http-skip-verify=on           (+) TLS証明書の認証をスキップする (32bit版対策)
   -http-skip-verify=off          (+) TLS証明書の認証をスキップしない (デフォルト)
-  -http-timeout <num>            タイムアウト時間（秒）デフォルト: 5秒（最低値）
+  -http-timeout <num>            (+) タイムアウト時間（秒）デフォルト: 5秒（最低値）
 
 
 (+)のついたオプションは、次回も同じ設定が使用されることを示す。
@@ -484,7 +485,8 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "YtNoStreamlink"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "YtNoYoutubeDl"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoSkipHb"), 0),
-		IFNULL((SELECT v FROM conf WHERE k == "HttpSkipVerify"), 0);
+		IFNULL((SELECT v FROM conf WHERE k == "HttpSkipVerify"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "HttpTimeout"), 0);
 	`).Scan(
 		&opt.NicoFormat,
 		&opt.NicoLimitBw,
@@ -506,6 +508,7 @@ func ParseArgs() (opt Option) {
 		&opt.YtNoYoutubeDl,
 		&opt.NicoSkipHb,
 		&opt.HttpSkipVerify,
+		&opt.HttpTimeout,
 	)
 	if err != nil {
 		log.Println(err)
@@ -790,11 +793,16 @@ func ParseArgs() (opt Option) {
 			if err != nil {
 				return err
 			}
-			num, err := strconv.Atoi(s)
+			if m := regexp.MustCompile(`^(sound_?only|audio_high)$`).FindStringSubmatch(s); len(m) > 0 {
+				opt.NicoLimitBw = m[0]
+				dbConfSet(db, "NicoLimitBw", opt.NicoLimitBw)
+				return nil
+			}
+			_, err = strconv.Atoi(s)
 			if err != nil {
 				return fmt.Errorf("--nico-limit-bw: Not a number: %s\n", s)
 			}
-			opt.NicoLimitBw = num
+			opt.NicoLimitBw = s
 			dbConfSet(db, "NicoLimitBw", opt.NicoLimitBw)
 			return nil
 		}},
@@ -1128,6 +1136,7 @@ func ParseArgs() (opt Option) {
 				return fmt.Errorf("--http-timeout: Invalid: %d: must be greater than or equal to %#v\n", num, MinimumHttpTimeout)
 			}
 			opt.HttpTimeout = num
+			dbConfSet(db, "HttpTimeout", opt.HttpTimeout)
 			return nil
 		}},
 	}

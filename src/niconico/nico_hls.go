@@ -255,6 +255,16 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 
 	files.MkdirByFileName(dbName)
 
+	var quality string
+	var limitBw int
+	if m := regexp.MustCompile(`^(sound_?only|audio_high)$`).FindStringSubmatch(opt.NicoLimitBw); len(m) > 0 {
+		quality = "audio_high"
+		limitBw = 0
+	} else {
+		quality = "abr"
+		limitBw, _ = strconv.Atoi(opt.NicoLimitBw)
+	}
+
 	hls = &NicoHls{
 		wsapi: wsapi,
 
@@ -262,7 +272,7 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		webSocketUrl:      webSocketUrl,
 		myUserId:          myUserId,
 
-		quality: "abr",
+		quality: quality,
 		dbName:  dbName,
 
 		isTimeshift:        timeshift,
@@ -270,8 +280,8 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 		ultrafastTimeshift: opt.NicoUltraFastTs,
 
 		NicoSession: opt.NicoSession,
-		limitBw:     opt.NicoLimitBw,
-		limitBwOrig: opt.NicoLimitBw,
+		limitBw:     limitBw,
+		limitBwOrig: limitBw,
 		nicoDebug:   opt.NicoDebug,
 
 		gmPlst: gorman.WithChecker(func(c int) { hls.checkReturnCode(c) }),
