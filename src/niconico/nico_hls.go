@@ -257,8 +257,8 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 
 	var quality string
 	var limitBw int
-	if m := regexp.MustCompile(`^(sound_?only|audio_high)$`).FindStringSubmatch(opt.NicoLimitBw); len(m) > 0 {
-		quality = "audio_high"
+	if m := regexp.MustCompile(`^(audio_only|audio_high)$`).FindStringSubmatch(opt.NicoLimitBw); len(m) > 0 {
+		quality = m[0]
 		limitBw = 0
 	} else {
 		quality = "abr"

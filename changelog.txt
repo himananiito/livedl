@@ -2,7 +2,7 @@
 
 2022xxxx.xx
 ・音声のみ録画対応
-　-nico-limit-bw に sound_only または audio_high を指定してください
+　-nico-limit-bw に audio_high または audio_only を指定してください
 ・-http-timeout の設定を保存するように修正
 ・live2.* -> live.* に修正
 

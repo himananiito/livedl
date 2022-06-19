@@ -130,7 +130,7 @@ COMMAND:
   -nico-rtmp-index <num>[,<num>] RTMP録画を行うメディアファイルの番号を指定
   -nico-hls-port <portnum>       [実験的] ローカルなHLSサーバのポート番号
   -nico-limit-bw <bandwidth>     (+) HLSのBANDWIDTHの上限値を指定する。0=制限なし
-                                 sound_only or audio_high = 音声のみ
+                                 audio_high or audio_only = 音声のみ
   -nico-format "FORMAT"          (+) 保存時のファイル名を指定する
   -nico-fast-ts                  倍速タイムシフト録画を行う(新配信タイムシフト)
   -nico-fast-ts=on               (+) 上記を有効に設定
@@ -793,7 +793,7 @@ func ParseArgs() (opt Option) {
 			if err != nil {
 				return err
 			}
-			if m := regexp.MustCompile(`^(sound_?only|audio_high)$`).FindStringSubmatch(s); len(m) > 0 {
+			if m := regexp.MustCompile(`^(audio_only|audio_high)$`).FindStringSubmatch(s); len(m) > 0 {
 				opt.NicoLimitBw = m[0]
 				dbConfSet(db, "NicoLimitBw", opt.NicoLimitBw)
 				return nil
