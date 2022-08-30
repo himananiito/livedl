@@ -838,7 +838,7 @@ func (hls *NicoHls) startComment(messageServerUri, threadId, waybackkey string) 
 					OBJ{"thread": OBJ{
 						"fork":        0,
 						"nicoru":      0,
-						"res_from":    -1000,
+						"res_from":    -100,
 						"scores":      1,
 						"thread":      threadId,
 						"user_id":     hls.myUserId,

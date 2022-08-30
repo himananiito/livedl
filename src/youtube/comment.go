@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 	"html"
 	"io/ioutil"
+	"regexp"
 
 	"github.com/himananiito/livedl/files"
 	"github.com/himananiito/livedl/gorman"
@@ -397,6 +397,8 @@ var SelComment = `SELECT
 
 func WriteComment(db *sql.DB, fileName string) {
 
+	regexp1 := regexp.MustCompile(":[a-zA-Z0-9\\-\\_]*:")
+
 	rows, err := db.Query(SelComment)
 	if err != nil {
 		log.Println(err)
@@ -405,15 +407,12 @@ func WriteComment(db *sql.DB, fileName string) {
 	defer rows.Close()
 
 	fileName = files.ChangeExtention(fileName, "xml")
-
-	dir := filepath.Dir(fileName)
-	base := filepath.Base(fileName)
-	base, err = files.GetFileNameNext(base)
+	fileName, err = files.GetFileNameNext(fileName)
+	fmt.Println("xml file: ", fileName)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	fileName = filepath.Join(dir, base)
 	f, err := os.Create(fileName)
 	if err != nil {
 		log.Fatalln(err)
@@ -470,8 +469,11 @@ func WriteComment(db *sql.DB, fileName string) {
 		)
 
 		line += ">"
-		message = html.EscapeString(message)
-		line += message
+		message = regexp1.ReplaceAllString(message, "")
+		if len(message) <= 0 {
+			message = "　"
+		}
+		line += html.EscapeString(message)
 		line += "</chat>"
 		fmt.Fprintf(f, "%s\r\n", line)
 	}
