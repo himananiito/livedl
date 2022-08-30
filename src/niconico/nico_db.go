@@ -39,15 +39,8 @@ func SelMediaF(seqnoStart, seqnoEnd int64) (ret string) {
 	ret = `SELECT
 	seqno, bandwidth, size, data FROM media
 	WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL`
-
-	if seqnoStart > 0 {
-		ret += ` AND seqno >= ` + fmt.Sprint(seqnoStart)
-	}
-
-	if seqnoEnd > 0 {
-		ret += ` AND seqno <= ` + fmt.Sprint(seqnoEnd)
-	}
-
+	ret += ` AND seqno >= ` + fmt.Sprint(seqnoStart)
+	ret += ` AND seqno <= ` + fmt.Sprint(seqnoEnd)
 	ret += ` ORDER BY seqno`
 
 	return
@@ -300,7 +293,19 @@ func (hls *NicoHls) dbGetFromWhen() (res_from int, when float64) {
 	return
 }
 
-func WriteComment(db *sql.DB, fileName string, skipHb bool) {
+func dbadjustVpos(opentime, offset, date, vpos int64, providerType string) (ret int64) {
+
+	ret = vpos
+	if providerType != "official" {
+		ret = (date - opentime) * 100 - offset
+	} else {
+		ret = vpos - offset
+	}
+	return ret
+
+}
+
+func WriteComment(db *sql.DB, fileName string, skipHb, adjustVpos bool, seqnoStart, seqnoEnd int64) {
 
 	var fSelComment = func(revision int) string {
 		var selAppend string
@@ -316,6 +321,31 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 	if nameCount > 0 {
 		commentRevision = 1
 	}
+
+	fmt.Println("commentRevision: ", commentRevision)
+
+	//adjustVposの場合はkvsテーブルから読み込み
+	var openTime int64
+	var providerType string
+	var offset int64
+	if adjustVpos == true {
+		var t float64
+		var sts string
+		db.QueryRow(`SELECT v FROM kvs WHERE k = 'providerType'`).Scan(&sts)
+		if sts == "ENDED" {
+			offset = seqnoStart * 500
+		} else {
+			offset = seqnoStart * 150
+		}
+		db.QueryRow(`SELECT v FROM kvs WHERE k = 'providerType'`).Scan(&providerType)
+		db.QueryRow(`SELECT v FROM kvs WHERE k = 'openTime'`).Scan(&t)
+		openTime = int64(t)
+	}
+
+	fmt.Println("adjustVpos: ", adjustVpos)
+	fmt.Println("providerType: ", providerType)
+	fmt.Println("openTime: ", openTime)
+	fmt.Println("offset: ", offset)
 
 	rows, err := db.Query(fSelComment(commentRevision))
 	if err != nil {
@@ -389,6 +419,15 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 			continue
 		}
 
+		// adjustVposの場合はvpos再計算
+		// vposが-1000(-10秒)より小さい場合は出力しない
+		if adjustVpos == true {
+			vpos = dbadjustVpos(openTime, offset, date, vpos, providerType)
+			if vpos <= -1000 {
+				continue
+			}
+		}
+
 		line := fmt.Sprintf(
 			`<chat thread="%s" vpos="%d" date="%d" date_usec="%d" user_id="%s"`,
 			thread,
@@ -451,9 +490,52 @@ func (hls *NicoHls) dbGetLastMedia(i int) (res []byte) {
 	hls.db.QueryRow("SELECT data FROM media WHERE seqno = ?", i).Scan(&res)
 	return
 }
-func (hls *NicoHls) dbGetLastSeqNo() (res int64) {
+//
+func (hls *NicoHls) dbGetLastSeqNo(flg int) (res int64) {
 	hls.dbMtx.Lock()
 	defer hls.dbMtx.Unlock()
-	hls.db.QueryRow("SELECT seqno FROM media ORDER BY seqno DESC LIMIT 1").Scan(&res)
+	var sql string
+	if flg == 1 {
+		sql = "SELECT seqno FROM media WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL ORDER BY seqno DESC LIMIT 1"
+	} else {
+		sql = "SELECT seqno FROM media ORDER BY seqno DESC LIMIT 1"
+	}
+	hls.db.QueryRow(sql).Scan(&res)
+	return
+}
+func DbGetLastSeqNo(db *sql.DB, flg int) (res int64) {
+	var sql string
+	if flg == 1 {
+		sql = "SELECT seqno FROM media WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL ORDER BY seqno DESC LIMIT 1"
+	} else {
+		sql = "SELECT seqno FROM media ORDER BY seqno DESC LIMIT 1"
+	}
+	db.QueryRow(sql).Scan(&res)
+	return
+}
+func DbGetFirstSeqNo(db *sql.DB, flg int) (res int64) {
+	var sql string
+	if flg == 1 {
+		sql = "SELECT seqno FROM media WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL ORDER BY seqno ASC LIMIT 1"
+	} else {
+		sql = "SELECT seqno FROM media ORDER BY seqno ASC LIMIT 1"
+	}
+	db.QueryRow(sql).Scan(&res)
+	return
+}
+func DbGetCountMedia(db *sql.DB, flg int) (res int64) {
+	var sql string
+	if flg == 1 {
+		sql = "SELECT COUNT(seqno) FROM media WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL"
+	} else if flg == 2 {
+		sql = "SELECT COUNT(seqno) FROM media WHERE IFNULL(notfound, 0) != 0 OR data IS NULL"
+	} else {
+		sql = "SELECT COUNT(seqno) FROM media"
+	}
+	db.QueryRow(sql).Scan(&res)
+	return
+}
+func DbGetCountComment(db *sql.DB) (res int64) {
+	db.QueryRow("SELECT COUNT(no) FROM comment").Scan(&res)
 	return
 }

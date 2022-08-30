@@ -441,16 +441,28 @@ func Convert(fileName string) (err error) {
 	return
 }
 
-func ExtractChunks(fileName string, skipHb bool) (done bool, err error) {
+func ExtractChunks(fileName string, skipHb, adjustVpos bool, seqnoStart, seqnoEnd int64) (done bool, err error) {
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
 		return
 	}
 	defer db.Close()
 
-	niconico.WriteComment(db, fileName, skipHb)
+	seqstart := niconico.DbGetFirstSeqNo(db, 1)
+	seqend   := niconico.DbGetLastSeqNo(db, 1)
 
-	rows, err := db.Query(niconico.SelMedia)
+	if seqnoStart > 0 && seqnoStart > seqstart {
+		seqstart = seqnoStart
+	}
+	if seqnoEnd > 0 && seqnoEnd < seqend {
+		seqend = seqnoEnd
+	}
+	fmt.Println("seqstart: ", seqstart)
+	fmt.Println("seqend: ", seqend)
+
+	niconico.WriteComment(db, fileName, skipHb, adjustVpos, seqstart, seqend)
+
+	rows, err := db.Query(niconico.SelMediaF(seqstart, seqend))
 	if err != nil {
 		return
 	}
@@ -496,14 +508,25 @@ func ExtractChunks(fileName string, skipHb bool) (done bool, err error) {
 	return
 }
 
-func ConvertDB(fileName, ext string, skipHb, forceConcat bool, seqnoStart, seqnoEnd int64) (done bool, nMp4s int, skipped bool, err error) {
+func ConvertDB(fileName, ext string, skipHb, adjustVpos, forceConcat bool, seqnoStart, seqnoEnd int64) (done bool, nMp4s int, skipped bool, err error) {
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
 		return
 	}
 	defer db.Close()
 
-	niconico.WriteComment(db, fileName, skipHb)
+	seqstart := niconico.DbGetFirstSeqNo(db, 1)
+	seqend   := niconico.DbGetLastSeqNo(db, 1)
+	if seqnoStart > 0 && seqnoStart > seqstart {
+		seqstart = seqnoStart
+	}
+	if seqnoEnd > 0 && seqnoEnd < seqend {
+		seqend = seqnoEnd
+	}
+	fmt.Println("seqstart: ", seqstart)
+	fmt.Println("seqend: ", seqend)
+
+	niconico.WriteComment(db, fileName, skipHb, adjustVpos, seqstart, seqend)
 
 	var zm *ZipMp4
 	defer func() {
@@ -516,7 +539,7 @@ func ConvertDB(fileName, ext string, skipHb, forceConcat bool, seqnoStart, seqno
 	zm = &ZipMp4{ZipName: fileName}
 	zm.OpenFFMpeg(ext)
 
-	rows, err := db.Query(niconico.SelMediaF(seqnoStart, seqnoEnd))
+	rows, err := db.Query(niconico.SelMediaF(seqstart, seqend))
 	if err != nil {
 		return
 	}

@@ -1861,7 +1861,7 @@ func (hls *NicoHls) serve(hlsPort int) {
 					delay = 4
 				}
 			}
-			seqno := hls.dbGetLastSeqNo() - int64(shift)
+			seqno := hls.dbGetLastSeqNo(0) - int64(shift)
 			body := fmt.Sprintf(
 				`#EXTM3U
 #EXT-X-VERSION:3
