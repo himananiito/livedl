@@ -191,7 +191,7 @@ func main() {
 
 	case "DB2MP4":
 		if strings.HasSuffix(opt.DBFile, ".yt.sqlite3") {
-			zip2mp4.YtComment(opt.DBFile)
+			zip2mp4.YtComment(opt.DBFile, opt.YtEmoji)
 
 		} else if opt.ExtractChunks {
 			if _, err := zip2mp4.ExtractChunks(opt.DBFile, opt.NicoSkipHb, opt.NicoAdjustVpos, opt.NicoConvSeqnoStart, opt.NicoConvSeqnoEnd); err != nil {

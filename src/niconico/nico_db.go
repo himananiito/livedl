@@ -228,6 +228,20 @@ func (hls *NicoHls) dbKVSet(k string, v interface{}) {
 	})
 }
 
+func (hls *NicoHls) dbKVExist(k string) (res int){
+	hls.dbMtx.Lock()
+	defer hls.dbMtx.Unlock()
+	query := `SELECT COUNT(*) FROM kvs WHERE k = ?`
+	hls.db.QueryRow(query, k).Scan(&res)
+	return
+}
+
+func DbKVGet(db *sql.DB, k string) (v interface{}){
+	query := `SELECT v FROM kvs WHERE k = ?`
+	db.QueryRow(query, k).Scan(&v)
+	return
+}
+
 func (hls *NicoHls) dbInsertReplaceOrIgnore(table string, data map[string]interface{}, replace bool) {
 	var keys []string
 	var qs []string
@@ -331,17 +345,21 @@ func WriteComment(db *sql.DB, fileName string, skipHb, adjustVpos bool, seqnoSta
 		var t float64
 		var sts string
 		var serverTime int64
-		db.QueryRow(`SELECT v FROM kvs WHERE k = 'serverTime'`).Scan(&t)
+		//db.QueryRow(`SELECT v FROM kvs WHERE k = 'serverTime'`).Scan(&t)
+		t = DbKVGet(db, "serverTime").(float64)
 		serverTime = int64(t)
-		db.QueryRow(`SELECT v FROM kvs WHERE k = 'openTime'`).Scan(&t)
+		//db.QueryRow(`SELECT v FROM kvs WHERE k = 'openTime'`).Scan(&t)
+		t = DbKVGet(db, "openTime").(float64)
 		openTime = int64(t)
-		db.QueryRow(`SELECT v FROM kvs WHERE k = 'status'`).Scan(&sts)
+		//db.QueryRow(`SELECT v FROM kvs WHERE k = 'status'`).Scan(&sts)
+		sts = DbKVGet(db, "status").(string)
 		if sts == "ENDED" {
 			offset = seqnoStart * 500 //timeshift
 		} else {
-			offset = (serverTime/10) - (openTime*100)
+			offset = (serverTime/10) - (openTime*100) //on_air
 		}
-		db.QueryRow(`SELECT v FROM kvs WHERE k = 'providerType'`).Scan(&providerType)
+		//db.QueryRow(`SELECT v FROM kvs WHERE k = 'providerType'`).Scan(&providerType)
+		providerType = DbKVGet(db, "providerType").(string)
 		fmt.Println("serverTime: ", serverTime)
 		fmt.Println("status: ", sts)
 	}

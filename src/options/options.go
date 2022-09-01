@@ -65,6 +65,7 @@ type Option struct {
 	YtNoStreamlink         bool
 	YtCommentStart         float64
 	YtNoYoutubeDl          bool
+	YtEmoji                bool
 	NicoSkipHb             bool // コメント出力時に/hbコマンドを出さない
 	NicoAdjustVpos         bool // コメント出力時にvposを補正する
 	HttpRootCA             string
@@ -176,6 +177,8 @@ Youtube live録画用オプション:
   -yt-comment-start              YouTube Liveアーカイブでコメント取得開始時間（秒）を指定
                                  ＜分＞:＜秒＞ | ＜時＞:＜分＞:＜秒＞ の形式でも指定可能
                                  0：続きからコメント取得  1：最初からコメント取得
+  -yt-emoji=on                   (+) コメントにemojiを表示する(ディフォルト)
+  -yt-emoji=off                  (+) コメントにemojiを表示しない
 
 変換オプション:
   -extract-chunks=off            (+) -d2mで動画ファイルに書き出す(デフォルト)
@@ -490,10 +493,11 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "NicoForceResv"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "YtNoStreamlink"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "YtNoYoutubeDl"), 0),
+		IFNULL((SELECT v FROM conf WHERE k == "YtEmoji"), 1),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoSkipHb"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoAdjustVpos"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "HttpSkipVerify"), 0),
-		IFNULL((SELECT v FROM conf WHERE k == "HttpTimeout"), 0);
+		IFNULL((SELECT v FROM conf WHERE k == "HttpTimeout"), 5);
 	`).Scan(
 		&opt.NicoFormat,
 		&opt.NicoLimitBw,
@@ -513,6 +517,7 @@ func ParseArgs() (opt Option) {
 		&opt.NicoForceResv,
 		&opt.YtNoStreamlink,
 		&opt.YtNoYoutubeDl,
+		&opt.YtEmoji,
 		&opt.NicoSkipHb,
 		&opt.NicoAdjustVpos,
 		&opt.HttpSkipVerify,
@@ -1071,6 +1076,18 @@ func ParseArgs() (opt Option) {
 			}
 			return nil
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?yt-?emoji(?:=(on|off))?\z`), func() (err error) {
+			if strings.EqualFold(match[1], "on") {
+				opt.YtEmoji = true
+				dbConfSet(db, "YtEmoji", opt.YtEmoji)
+			} else if strings.EqualFold(match[1], "off") {
+				opt.YtEmoji = false
+				dbConfSet(db, "YtEmoji", opt.YtEmoji)
+			} else {
+				opt.YtEmoji = true
+			}
+			return
+		}},
 		Parser{regexp.MustCompile(`\A(?i)--?yt-?comment-?start\z`), func() (err error) {
 			s, err := nextArg()
 			if err != nil {
@@ -1157,7 +1174,6 @@ func ParseArgs() (opt Option) {
 			} else {
 				opt.NicoAdjustVpos = false
 			}
-
 			return
 		}},
 	}
@@ -1292,6 +1308,7 @@ LB_ARG:
 	case "YOUTUBE":
 		fmt.Printf("Conf(YtNoStreamlink): %#v\n", opt.YtNoStreamlink)
 		fmt.Printf("Conf(YtNoYoutubeDl): %#v\n", opt.YtNoYoutubeDl)
+		fmt.Printf("Conf(YtEmoji): %#v\n", opt.YtEmoji)
 
 	case "TWITCAS":
 		fmt.Printf("Conf(TcasRetry): %#v\n", opt.TcasRetry)
@@ -1303,6 +1320,7 @@ LB_ARG:
 		fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
 		fmt.Printf("Conf(NicoSkipHb): %#v\n", opt.NicoSkipHb)
 		fmt.Printf("Conf(NicoAdjustVpos): %#v\n", opt.NicoAdjustVpos)
+		fmt.Printf("Conf(YtEmoji): %#v\n", opt.YtEmoji)
 	case "DB2HLS":
 		fmt.Printf("Conf(NicoHlsPort): %#v\n", opt.NicoHlsPort)
 		fmt.Printf("Conf(NicoConvSeqnoStart): %#v\n", opt.NicoConvSeqnoStart)

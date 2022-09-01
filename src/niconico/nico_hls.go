@@ -317,10 +317,14 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 
 	// 放送情報をdbに入れる。自身のユーザ情報は入れない
 	// dbに入れたくないデータはキーの先頭を//としている
-	for k, v := range prop {
-		if !strings.HasPrefix(k, "//") {
-			hls.dbKVSet(k, v)
+	// 生放送の場合はデータが既にあればupdateしない
+	if hls.isTimeshift || hls.dbKVExist("serverTime") == 0 {
+		for k, v := range prop {
+			if (! strings.HasPrefix(k, "//")) {
+				hls.dbKVSet(k, v)
+			}
 		}
+		fmt.Println("Write dbKVSet")
 	}
 
 	return
@@ -395,10 +399,14 @@ func (hls *NicoHls) commentHandler(tag string, attr interface{}) (err error) {
 			"hash":      hash,
 		})
 	} else {
-		if d, ok := attrMap["thread"].(float64); ok {
-			hls.dbKVSet("comment/thread", fmt.Sprintf("%.f", d))
-		} else if s, ok := attrMap["thread"].(string); ok {
-			hls.dbKVSet("comment/thread", s)
+		// 生放送の場合はデータが既にあればupdateしない
+		if hls.isTimeshift || hls.dbKVExist("comment/thread") == 0 {
+			if d, ok := attrMap["thread"].(float64); ok {
+				hls.dbKVSet("comment/thread", fmt.Sprintf("%.f", d))
+			} else if s, ok := attrMap["thread"].(string); ok {
+				hls.dbKVSet("comment/thread", s)
+			}
+			fmt.Println("Write dbKVSet(command/thread)")
 		}
 	}
 

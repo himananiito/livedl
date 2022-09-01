@@ -736,13 +736,13 @@ func ReplayDB(fileName string, hlsPort int, seqnoStart int64) (err error) {
 	return
 }
 
-func YtComment(fileName string) (done bool, err error) {
+func YtComment(fileName string, ytemoji bool) (done bool, err error) {
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
 		return
 	}
 	defer db.Close()
 
-	youtube.WriteComment(db, fileName)
+	youtube.WriteComment(db, fileName, ytemoji)
 	return
 }
