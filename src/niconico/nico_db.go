@@ -318,7 +318,7 @@ func dbadjustVpos(opentime, offset, date, vpos int64, providerType string) (ret 
 
 }
 
-func WriteComment(db *sql.DB, fileName string, skipHb, adjustVpos bool, seqnoStart, seqnoEnd int64) {
+func WriteComment(db *sql.DB, fileName string, skipHb, adjustVpos bool, seqnoStart, seqnoEnd, seqOffset int64) {
 
 	var fSelComment = func(revision int) string {
 		var selAppend string
@@ -356,7 +356,7 @@ func WriteComment(db *sql.DB, fileName string, skipHb, adjustVpos bool, seqnoSta
 		if sts == "ENDED" {
 			offset = seqnoStart * 500 //timeshift
 		} else {
-			offset = (serverTime/10) - (openTime*100) //on_air
+			offset = (serverTime/10) - (openTime*100) + (seqOffset*150) //on_air
 		}
 		//db.QueryRow(`SELECT v FROM kvs WHERE k = 'providerType'`).Scan(&providerType)
 		providerType = DbKVGet(db, "providerType").(string)

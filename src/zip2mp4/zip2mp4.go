@@ -450,17 +450,20 @@ func ExtractChunks(fileName string, skipHb, adjustVpos bool, seqnoStart, seqnoEn
 
 	seqstart := niconico.DbGetFirstSeqNo(db, 1)
 	seqend   := niconico.DbGetLastSeqNo(db, 1)
+	var seqoffset int64
 
 	if seqnoStart > 0 && seqnoStart > seqstart {
+		seqoffset = seqnoStart - seqstart // リアルタイム放送の開始時間の計算用
 		seqstart = seqnoStart
 	}
 	if seqnoEnd > 0 && seqnoEnd < seqend {
 		seqend = seqnoEnd
 	}
 	fmt.Println("seqstart: ", seqstart)
+	fmt.Println("seqoffset: ", seqoffset)
 	fmt.Println("seqend: ", seqend)
 
-	niconico.WriteComment(db, fileName, skipHb, adjustVpos, seqstart, seqend)
+	niconico.WriteComment(db, fileName, skipHb, adjustVpos, seqstart, seqend, seqoffset)
 
 	rows, err := db.Query(niconico.SelMediaF(seqstart, seqend))
 	if err != nil {
@@ -517,16 +520,20 @@ func ConvertDB(fileName, ext string, skipHb, adjustVpos, forceConcat bool, seqno
 
 	seqstart := niconico.DbGetFirstSeqNo(db, 1)
 	seqend   := niconico.DbGetLastSeqNo(db, 1)
+	var seqoffset int64
+
 	if seqnoStart > 0 && seqnoStart > seqstart {
+		seqoffset = seqnoStart - seqstart // リアルタイム放送の開始時間の計算用
 		seqstart = seqnoStart
 	}
 	if seqnoEnd > 0 && seqnoEnd < seqend {
 		seqend = seqnoEnd
 	}
 	fmt.Println("seqstart: ", seqstart)
+	fmt.Println("seqoffset: ", seqoffset)
 	fmt.Println("seqend: ", seqend)
 
-	niconico.WriteComment(db, fileName, skipHb, adjustVpos, seqstart, seqend)
+	niconico.WriteComment(db, fileName, skipHb, adjustVpos, seqstart, seqend, seqoffset)
 
 	var zm *ZipMp4
 	defer func() {
