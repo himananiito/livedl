@@ -673,7 +673,7 @@ func (hls *NicoHls) waitAllGoroutines() {
 func (hls *NicoHls) getwaybackkey(threadId string) (waybackkey string, neterr, err error) {
 
 	uri := fmt.Sprintf("https://live.nicovideo.jp/api/getwaybackkey?thread=%s", url.QueryEscape(threadId))
-	resp, err, neterr := httpbase.Get(uri, map[string]string{"Cookie": "user_session=" + hls.NicoSession})
+	resp, err, neterr := httpbase.Get(uri, map[string]string{"Cookie": "user_session=" + hls.NicoSession}, nil)
 	if err != nil {
 		return
 	}
@@ -916,7 +916,7 @@ func getStringBase(uri string, header map[string]string) (s string, code int, t 
 		t = (time.Now().UnixNano() - start) / (1000 * 1000)
 	}()
 
-	resp, err, neterr := httpbase.Get(uri, header)
+	resp, err, neterr := httpbase.Get(uri, header, nil)
 	if err != nil {
 		return
 	}
@@ -948,7 +948,7 @@ func postStringHeader(uri string, header map[string]string, val url.Values) (s s
 		t = (time.Now().UnixNano() - start) / (1000 * 1000)
 	}()
 
-	resp, err, neterr := httpbase.PostForm(uri, header, val)
+	resp, err, neterr := httpbase.PostForm(uri, header, nil, val)
 	if err != nil {
 		return
 	}
@@ -975,7 +975,7 @@ func getBytes(uri string) (code int, buff []byte, t int64, err, neterr error) {
 		t = (time.Now().UnixNano() - start) / (1000 * 1000)
 	}()
 
-	resp, err, neterr := httpbase.Get(uri, nil)
+	resp, err, neterr := httpbase.Get(uri, nil, nil)
 	if err != nil {
 		return
 	}

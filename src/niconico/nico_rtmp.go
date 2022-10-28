@@ -611,7 +611,7 @@ func getStatus(opt options.Option) (status *Status, notLogin bool, err error) {
 	//	req.Header.Set("User-Agent", "Niconico/1.0 (Unix; U; iPhone OS 10.3.3; ja-jp; nicoiphone; iPhone5,2) Version/6.65")
 	//}
 
-	resp, err, neterr := httpbase.Get(uri, header)
+	resp, err, neterr := httpbase.Get(uri, header, nil)
 	if err != nil {
 		return
 	}
