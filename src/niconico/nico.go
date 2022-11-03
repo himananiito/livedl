@@ -174,9 +174,17 @@ func NicoLogin(opt options.Option) (err error) {
 
 func Record(opt options.Option) (hlsPlaylistEnd bool, dbName string, err error) {
 
+	opt.NicoHlsOnly = true
+	opt.NicoRtmpOnly = false
+
 	for i := 0; i < 2; i++ {
 		// load session info
-		if opt.NicoSession == "" || i > 0 {
+		if opt.NicoCookies != "" {
+			opt.NicoSession, err = NicoBrowserCookies(opt)
+			if err != nil {
+				return
+			}
+		}else if opt.NicoSession == "" || i > 0 {
 			_, _, opt.NicoSession, _ = options.LoadNicoAccount(opt.NicoLoginAlias)
 		}
 
