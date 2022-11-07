@@ -183,7 +183,7 @@ Youtube live録画用オプション:
   -yt-comment-start              YouTube Liveアーカイブでコメント取得開始時間（秒）を指定
                                  ＜分＞:＜秒＞ | ＜時＞:＜分＞:＜秒＞ の形式でも指定可能
                                  0：続きからコメント取得  1：最初からコメント取得
-  -yt-emoji=on                   (+) コメントにemojiを表示する(ディフォルト)
+  -yt-emoji=on                   (+) コメントにemojiを表示する(デフォルト)
   -yt-emoji=off                  (+) コメントにemojiを表示しない
 
 変換オプション:

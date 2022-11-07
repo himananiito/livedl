@@ -1,5 +1,21 @@
 ﻿更新履歴
 
+20221108.41
+・直接ログインの２段階認証(MFA)対応
+・上記に伴うlogin APIのendpoint、cookie取得方法の変更
+・firefoxからのcookie取得機能追加
+  -nico-cookies firefox[:profile|cookiefile]
+  e.g.  
+  - profile default-release のcookieを取得
+      ./livedl -nico-cookies firefox
+  - profile NicoTaro のcookieを取得
+      ./livedl -nico-cookies firefox:NicoTaro 
+  - 直接cookiefileを指定
+      ./livedl -nico-cookies firefox:'C:/Users/*******/AppData/Roaming/Mozilla/Firefox/Profiles/*****/cookies.sqlite' 
+※Mac/Linuxで `cookies from browser failed: firefox profiles not found`が 表示される場合は報告おねがいします   
+※直接cookiefile指定の場合は必ず'か"で囲ってください  
+※プロファイルにspaceを含む場合は'か"で囲ってください  
+
 20220905.40
 ・ニコ生のコメントのvposを補正
   -nico-adjust-vpos=on
