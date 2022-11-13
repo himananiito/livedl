@@ -215,6 +215,21 @@ func main() {
 			fmt.Println(err)
 			os.Exit(1)
 		}
+
+	case "DBINFO":
+		if strings.HasSuffix(opt.DBFile, ".yt.sqlite3") {
+			if _, err := youtube.ShowDbInfo(opt.DBFile); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+		} else {
+			if _, err := niconico.ShowDbInfo(opt.DBFile, opt.ConvExt); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+		}
+
 	}
 
 	return

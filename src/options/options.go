@@ -107,6 +107,8 @@ COMMAND:
   -tcas    ツイキャスの録画
   -yt      YouTube Liveの録画
   -d2m     録画済みのdb(.sqlite3)をmp4に変換する(-db-to-mp4)
+  -dbinfo  録画済みのdb(.sqlite3)の各種情報を表示する
+           e.g. $ livedl -dbinfo -- 'C:/home/hogehoge/livedl/rec/lvxxxxxxxx.sqlite3'
   -d2h     [実験的] 録画済みのdb(.sqlite3)を視聴するためのHLSサーバを立てる(-db-to-hls)
            開始シーケンス番号は（変換ではないが） -nico-conv-seqno-start で指定
            使用例：$ livedl lvXXXXXXXXX.sqlite3 -d2h -nico-hls-port 12345 -nico-conv-seqno-start 2780
@@ -695,6 +697,10 @@ func ParseArgs() (opt Option) {
 			opt.Command = "DB2HLS"
 			return nil
 		}},
+		Parser{regexp.MustCompile(`\A(?i)--?(?:d|db|sqlite3?)-?(?:i|info)\z`), func() error {
+			opt.Command = "DBINFO"
+			return nil
+		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?login-?only(?:=(on|off))?\z`), func() error {
 			if strings.EqualFold(match[1], "on") {
 				opt.NicoLoginOnly = true
@@ -1244,7 +1250,7 @@ func ParseArgs() (opt Option) {
 				opt.ZipFile = arg
 				return true
 			}
-		case "DB2MP4", "DB2HLS":
+		case "DB2MP4", "DB2HLS", "DBINFO":
 			if ma := regexp.MustCompile(`(?i)\.sqlite3`).FindStringSubmatch(arg); len(ma) > 0 {
 				opt.DBFile = arg
 				return true
@@ -1345,7 +1351,7 @@ LB_ARG:
 		fmt.Printf("Conf(TcasRetry): %#v\n", opt.TcasRetry)
 		fmt.Printf("Conf(TcasRetryTimeoutMinute): %#v\n", opt.TcasRetryTimeoutMinute)
 		fmt.Printf("Conf(TcasRetryInterval): %#v\n", opt.TcasRetryInterval)
-	case "DB2MP4":
+	case "DB2MP4", "DBINFO":
 		fmt.Printf("Conf(ExtractChunks): %#v\n", opt.ExtractChunks)
 		fmt.Printf("Conf(NicoConvForceConcat): %#v\n", opt.NicoConvForceConcat)
 		fmt.Printf("Conf(ConvExt): %#v\n", opt.ConvExt)
@@ -1385,7 +1391,7 @@ LB_ARG:
 		if opt.ZipFile == "" {
 			Help()
 		}
-	case "DB2MP4", "DB2HLS":
+	case "DB2MP4", "DB2HLS", "DBINFO":
 		if opt.DBFile == "" {
 			Help()
 		}

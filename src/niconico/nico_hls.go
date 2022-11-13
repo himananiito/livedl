@@ -324,7 +324,7 @@ func NewHls(opt options.Option, prop map[string]interface{}) (hls *NicoHls, err 
 				hls.dbKVSet(k, v)
 			}
 		}
-		fmt.Println("Write dbKVSet")
+		//fmt.Println("Write dbKVSet")
 	}
 
 	return
@@ -406,7 +406,7 @@ func (hls *NicoHls) commentHandler(tag string, attr interface{}) (err error) {
 			} else if s, ok := attrMap["thread"].(string); ok {
 				hls.dbKVSet("comment/thread", s)
 			}
-			fmt.Println("Write dbKVSet(command/thread)")
+			//fmt.Println("Write dbKVSet(command/thread)")
 		}
 	}
 

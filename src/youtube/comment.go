@@ -383,6 +383,42 @@ func dbGetContinuation(ctx context.Context, db *sql.DB, mtx *sync.Mutex) (res st
 	return
 }
 
+func DbGetCountComment(db *sql.DB) (res int64) {
+	db.QueryRow("SELECT COUNT(id) FROM comment").Scan(&res)
+	return
+}
+
+func ShowDbInfo(fileName string) (done bool, err error) {
+	_, err = os.Stat(fileName)
+	if err != nil {
+		fmt.Println("sqlite3 file not found:")
+		return
+	}
+	db, err := sql.Open("sqlite3", "file:"+fileName+"?mode=ro&immutable=1")
+	if err != nil {
+		return
+	}
+	defer db.Close()
+
+	fmt.Println("----- DATABASE info. -----")
+	fmt.Println("sqlite3 file :", fileName)
+	for _, tbl := range []string{"comment"} {
+		if !dbIsExistTable(db, tbl) {
+			fmt.Println("table", tbl, "not found")
+		} else {
+			fmt.Println("table", tbl, "exist")
+		}
+	}
+
+	comm_data := DbGetCountComment(db)
+	fmt.Println("----- comment info. -----")
+	fmt.Println("data: ", comm_data)
+
+	done = true
+
+	return
+}
+
 var SelComment = `SELECT
 	timestampUsec,
 	IFNULL(videoOffsetTimeMsec, -1),
@@ -480,4 +516,15 @@ func WriteComment(db *sql.DB, fileName string, emoji bool) {
 		fmt.Fprintf(f, "%s\r\n", line)
 	}
 	fmt.Fprintf(f, "%s\r\n", `</packet>`)
+}
+func dbIsExistTable(db *sql.DB, table_name string) (ret bool) {
+	var res int
+	ret = false
+	if len(table_name) > 0 {
+		db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE TYPE='table' AND name=?", table_name).Scan(&res)
+		if res > 0 {
+			ret = true
+		}
+	}
+	return
 }
