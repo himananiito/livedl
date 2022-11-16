@@ -31,10 +31,6 @@ type Option struct {
 	NicoStatusHTTPS        bool
 	NicoSession            string
 	NicoLoginAlias         string
-	NicoRtmpMaxConn        int
-	NicoRtmpOnly           bool
-	NicoRtmpIndex          map[int]bool
-	NicoHlsOnly            bool
 	NicoLoginOnly          bool
 	NicoCookies            string
 	NicoTestTimeout        int
@@ -130,14 +126,6 @@ COMMAND:
                                  firefoxのcookieを使用する(デフォルトはdefault-release)
                                  profileまたはcookiefileを直接指定も可能
                                  スペースが入る場合はquoteで囲む
-  -nico-hls-only                 録画時にHLSのみを試す
-  -nico-hls-only=on              (+) 上記を有効に設定
-  -nico-hls-only=off             (+) 上記を無効に設定(デフォルト)
-  -nico-rtmp-only                録画時にRTMPのみを試す
-  -nico-rtmp-only=on             (+) 上記を有効に設定
-  -nico-rtmp-only=off            (+) 上記を無効に設定(デフォルト)
-  -nico-rtmp-max-conn <num>      RTMPの同時接続数を設定
-  -nico-rtmp-index <num>[,<num>] RTMP録画を行うメディアファイルの番号を指定
   -nico-hls-port <portnum>       [実験的] ローカルなHLSサーバのポート番号
   -nico-limit-bw <bandwidth>     (+) HLSのBANDWIDTHの上限値を指定する。0=制限なし
                                  audio_high or audio_only = 音声のみ
@@ -498,8 +486,6 @@ func ParseArgs() (opt Option) {
 		IFNULL((SELECT v FROM conf WHERE k == "NicoFormat"), ""),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoLimitBw"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoLoginOnly"), 0),
-		IFNULL((SELECT v FROM conf WHERE k == "NicoHlsOnly"), 0),
-		IFNULL((SELECT v FROM conf WHERE k == "NicoRtmpOnly"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoFastTs"), 0),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoLoginAlias"), ""),
 		IFNULL((SELECT v FROM conf WHERE k == "NicoAutoConvert"), 0),
@@ -522,8 +508,6 @@ func ParseArgs() (opt Option) {
 		&opt.NicoFormat,
 		&opt.NicoLimitBw,
 		&opt.NicoLoginOnly,
-		&opt.NicoHlsOnly,
-		&opt.NicoRtmpOnly,
 		&opt.NicoFastTs,
 		&opt.NicoLoginAlias,
 		&opt.NicoAutoConvert,
@@ -713,30 +697,6 @@ func ParseArgs() (opt Option) {
 			}
 			return nil
 		}},
-		Parser{regexp.MustCompile(`\A(?i)--?nico-?hls-?only(?:=(on|off))?\z`), func() error {
-			if strings.EqualFold(match[1], "on") {
-				opt.NicoHlsOnly = true
-				dbConfSet(db, "NicoHlsOnly", opt.NicoHlsOnly)
-			} else if strings.EqualFold(match[1], "off") {
-				opt.NicoHlsOnly = false
-				dbConfSet(db, "NicoHlsOnly", opt.NicoHlsOnly)
-			} else {
-				opt.NicoHlsOnly = true
-			}
-			return nil
-		}},
-		Parser{regexp.MustCompile(`\A(?i)--?nico-?rtmp-?only(?:=(on|off))?\z`), func() error {
-			if strings.EqualFold(match[1], "on") {
-				opt.NicoRtmpOnly = true
-				dbConfSet(db, "NicoRtmpOnly", opt.NicoRtmpOnly)
-			} else if strings.EqualFold(match[1], "off") {
-				opt.NicoRtmpOnly = false
-				dbConfSet(db, "NicoRtmpOnly", opt.NicoRtmpOnly)
-			} else {
-				opt.NicoRtmpOnly = true
-			}
-			return nil
-		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?fast-?ts(?:=(on|off))?\z`), func() error {
 			if strings.EqualFold(match[1], "on") {
 				opt.NicoFastTs = true
@@ -783,27 +743,6 @@ func ParseArgs() (opt Option) {
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?(?:u|ultra)fast-?ts\z`), func() error {
 			opt.NicoUltraFastTs = true
 			return nil
-		}},
-		Parser{regexp.MustCompile(`\A(?i)--?nico-?rtmp-?index\z`), func() (err error) {
-			str, err := nextArg()
-			if err != nil {
-				return
-			}
-			ar := strings.Split(str, ",")
-			if len(ar) > 0 {
-				opt.NicoRtmpIndex = make(map[int]bool)
-			}
-			for _, s := range ar {
-				num, err := strconv.Atoi(s)
-				if err != nil {
-					return fmt.Errorf("--nico-rtmp-index: Not a number: %s\n", s)
-				}
-				if num <= 0 {
-					return fmt.Errorf("--nico-rtmp-index: Invalid: %d: must be greater than or equal to 1\n", num)
-				}
-				opt.NicoRtmpIndex[num-1] = true
-			}
-			return
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?status-?https\z`), func() error {
 			// experimental
@@ -926,6 +865,7 @@ func ParseArgs() (opt Option) {
 				opt.NicoLoginAlias = fmt.Sprintf("%x", sha3.Sum256([]byte(loginId)))
 				SetNicoLogin(opt.NicoLoginAlias, loginId, loginPass)
 				dbConfSet(db, "NicoLoginAlias", opt.NicoLoginAlias)
+				opt.NicoLoginOnly = true
 
 			} else {
 				return fmt.Errorf("--nico-login: <id>,<password>")
@@ -968,19 +908,6 @@ func ParseArgs() (opt Option) {
 				err = fmt.Errorf("--nico-load-session: load failured")
 			}
 
-			return
-		}},
-		Parser{regexp.MustCompile(`\A(?i)--?nico-?rtmp-?max-?conn\z`), func() (err error) {
-			str, err := nextArg()
-			if err != nil {
-				return
-			}
-
-			num, err := strconv.Atoi(str)
-			if err != nil {
-				return fmt.Errorf("--nico-rtmp-max-conn %v: %v", str, err)
-			}
-			opt.NicoRtmpMaxConn = num
 			return
 		}},
 		Parser{regexp.MustCompile(`\A(?i)--?nico-?debug\z`), func() error {
@@ -1328,8 +1255,6 @@ LB_ARG:
 		fmt.Printf("Conf(NicoLoginOnly): %#v\n", opt.NicoLoginOnly)
 		fmt.Printf("Conf(NicoFormat): %#v\n", opt.NicoFormat)
 		fmt.Printf("Conf(NicoLimitBw): %#v\n", opt.NicoLimitBw)
-		fmt.Printf("Conf(NicoHlsOnly): %#v\n", opt.NicoHlsOnly)
-		fmt.Printf("Conf(NicoRtmpOnly): %#v\n", opt.NicoRtmpOnly)
 		fmt.Printf("Conf(NicoFastTs): %#v\n", opt.NicoFastTs)
 		fmt.Printf("Conf(NicoAutoConvert): %#v\n", opt.NicoAutoConvert)
 		if opt.NicoAutoConvert {

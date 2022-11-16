@@ -24,8 +24,8 @@ import (
 
 func joinCookie(cookies []*http.Cookie) (result string) {
 	result = ""
-	for _ ,v := range cookies {
-		result += v.String()+"; "
+	for _, v := range cookies {
+		result += v.String() + "; "
 	}
 	return result
 }
@@ -47,7 +47,7 @@ func NicoLogin(opt options.Option) (err error) {
 	resp, err, neterr := httpbase.PostForm(
 		"https://account.nicovideo.jp/login/redirector?show_button_twitter=1&site=niconico&show_button_facebook=1&next_url=%2F",
 		map[string]string{
-			"Origin": "https://account.nicovideo.jp",
+			"Origin":  "https://account.nicovideo.jp",
 			"Referer": "https://account.nicovideo.jp/login",
 		},
 		jar,
@@ -80,12 +80,12 @@ func NicoLogin(opt options.Option) (err error) {
 		loc := resp.Request.Response.Header.Values("Location")[0]
 		//fmt.Fprintln(os.Stderr, "Location:",loc)
 		resp, err, neterr = httpbase.Get(
-		loc,
-		map[string]string{
-			"Origin": "https://account.nicovideo.jp",
-			"Referer": "https://account.nicovideo.jp/login",
-		},
-		jar);
+			loc,
+			map[string]string{
+				"Origin":  "https://account.nicovideo.jp",
+				"Referer": "https://account.nicovideo.jp/login",
+			},
+			jar)
 		if err != nil {
 			err = fmt.Errorf("login MFA error")
 			return
@@ -112,7 +112,7 @@ func NicoLogin(opt options.Option) (err error) {
 		}
 		loc = "https://account.nicovideo.jp" + ma[1]
 		if opt.NicoDebug {
-			fmt.Fprintln(os.Stderr, "Location:",loc)
+			fmt.Fprintln(os.Stderr, "Location:", loc)
 		}
 		//6 digits code を入力
 		otp := ""
@@ -139,7 +139,7 @@ func NicoLogin(opt options.Option) (err error) {
 		resp, err, neterr = httpbase.PostForm(
 			loc,
 			map[string]string{
-				"Origin": "https://account.nicovideo.jp",
+				"Origin":  "https://account.nicovideo.jp",
 				"Referer": "https://account.nicovideo.jp/login",
 			},
 			jar,
@@ -174,9 +174,6 @@ func NicoLogin(opt options.Option) (err error) {
 
 func Record(opt options.Option) (hlsPlaylistEnd bool, dbName string, err error) {
 
-	opt.NicoHlsOnly = true
-	opt.NicoRtmpOnly = false
-
 	for i := 0; i < 2; i++ {
 		// load session info
 		if opt.NicoCookies != "" {
@@ -184,46 +181,29 @@ func Record(opt options.Option) (hlsPlaylistEnd bool, dbName string, err error) 
 			if err != nil {
 				return
 			}
-		}else if opt.NicoSession == "" || i > 0 {
+		} else if opt.NicoSession == "" || i > 0 {
 			_, _, opt.NicoSession, _ = options.LoadNicoAccount(opt.NicoLoginAlias)
 		}
 
-		if !opt.NicoRtmpOnly {
-			var done bool
-			var notLogin bool
-			var reserved bool
-			done, hlsPlaylistEnd, notLogin, reserved, dbName, err = NicoRecHls(opt)
-			if done {
-				return
-			}
-			if err != nil {
-				return
-			}
-			if notLogin {
-				fmt.Println("not_login")
-				if err = NicoLogin(opt); err != nil {
-					return
-				}
-				continue
-			}
-			if reserved {
-				continue
-			}
+		var done bool
+		var notLogin bool
+		var reserved bool
+		done, hlsPlaylistEnd, notLogin, reserved, dbName, err = NicoRecHls(opt)
+		if done {
+			return
 		}
-
-		if !opt.NicoHlsOnly {
-			notLogin, e := NicoRecRtmp(opt)
-			if e != nil {
-				err = e
+		if err != nil {
+			return
+		}
+		if notLogin {
+			fmt.Println("not_login")
+			if err = NicoLogin(opt); err != nil {
 				return
 			}
-			if notLogin {
-				fmt.Println("not_login")
-				if err = NicoLogin(opt); err != nil {
-					return
-				}
-				continue
-			}
+			continue
+		}
+		if reserved {
+			continue
 		}
 
 		break
@@ -245,10 +225,6 @@ func TestRun(opt options.Option) (err error) {
 			<-ch
 			os.Exit(0)
 		}()
-	}
-
-	opt.NicoRtmpIndex = map[int]bool{
-		0: true,
 	}
 
 	var nextId func() string
