@@ -1936,6 +1936,8 @@ func postTsRsvBase(num int, vid, session string) (err error) {
 
 	header := map[string]string{
 		"Cookie": "user_session=" + session,
+		"Referer": "https://live.nicovideo.jp/watch/lv" + vid,
+		"Origin": "https://live.nicovideo.jp",
 	}
 	dat0, _, _, err, neterr := getStringHeader(uri, header)
 	if err != nil || neterr != nil {
@@ -1946,12 +1948,14 @@ func postTsRsvBase(num int, vid, session string) (err error) {
 	}
 
 	var token string
-	if ma := regexp.MustCompile(
-		`TimeshiftActions\.(doRegister|confirmToWatch|moveWatch)\(['"].*?['"]\s*(?:,\s*['"](.+?)['"])`).
-		FindStringSubmatch(dat0); len(ma) > 0 {
-		if len(ma) > 2 {
-			token = ma[2]
-		}
+	if ma := regexp.MustCompile(`(ulck_\d+)`).FindStringSubmatch(dat0); len(ma) > 0 {
+		token = ma[1]
+	} else if strings.Contains(dat0, "システムエラーが発生しました") {
+		err = fmt.Errorf("postTsRsv: system error try again in a few minutes")
+		return
+	} else if strings.Contains(dat0, "申し込み期限切れ") {
+		err = fmt.Errorf("postTsRsv: deadline expired")
+		return
 	} else if strings.Contains(dat0, "視聴済み") {
 		err = fmt.Errorf("postTsRsv: already watched")
 		return
@@ -1963,13 +1967,13 @@ func postTsRsvBase(num int, vid, session string) (err error) {
 
 	// "X-Requested-With": "XMLHttpRequest",
 	// "Origin": "https://live.nicovideo.jp",
-	// "Referer": fmt.Sprintf("https://live.nicovideo.jp/gate/%s", opt.NicoLiveId),
+	//	"Referer": fmt.Sprintf("https://live.nicovideo.jp/watch/%s", opt.NicoLiveId),
 	// "X-Prototype-Version": "1.6.0.3",
 
 	var vals url.Values
 	if num == 0 {
 		vals = url.Values{
-			"mode":       []string{"overwrite"},
+			"mode":       []string{"auto_register"},
 			"vid":        []string{vid},
 			"token":      []string{token},
 			"rec_pos":    []string{""},
@@ -1983,7 +1987,7 @@ func postTsRsvBase(num int, vid, session string) (err error) {
 			"mode":   []string{"use"},
 			"vid":    []string{vid},
 			"token":  []string{token},
-			"_":      []string{""},
+			"":      []string{""},
 		}
 	}
 
@@ -1998,12 +2002,60 @@ func postTsRsvBase(num int, vid, session string) (err error) {
 		fmt.Printf("postTsRsv: status not ok: >>>%s<<<\n", dat1)
 		err = fmt.Errorf("postTsRsv: status not ok")
 		return
+	} else {
+		if num == 0 {
+			fmt.Println("postTsRsv0: status ok")
+		} else {
+			fmt.Println("postTsRsv1: status ok")
+		}
 	}
 
 	return
 }
 
-func getProps(opt options.Option) (props interface{}, notLogin, tsRsv0, tsRsv1 bool, err error) {
+func postRsvUseTs(isRsv bool, opt options.Option) (err error) {
+
+	var vid string
+	if ma := regexp.MustCompile(`lv(\d+)`).FindStringSubmatch(opt.NicoLiveId); len(ma) > 0 {
+		vid = ma[1]
+	}
+	uri := "https://live.nicovideo.jp/api/timeshift.ticket.use"
+	RsvMsg := "Use"
+	if isRsv {
+		uri = "https://live.nicovideo.jp/api/timeshift.reservations";
+		RsvMsg = "Rsv"
+	}
+	header := map[string]string{
+		"Cookie": "user_session=" + opt.NicoSession,
+		"Accept": "application/json, text/plain */*",
+		"Referer": fmt.Sprintf("https://live.nicovideo.jp/watch/%s", opt.NicoLiveId),
+		"Origin": "https://live.nicovideo.jp",
+	}
+	vals := url.Values{"vid": []string{vid},}
+
+	dat, _, _, err, neterr := postStringHeader(uri, header, vals)
+	if err != nil || neterr != nil {
+		if err == nil {
+			err = neterr
+		}
+		return
+	}
+	if !strings.Contains(dat, "status\":200") {
+		if ma := regexp.MustCompile(`\"description\":\"([^\"]+)\"`).FindStringSubmatch(dat); len(ma) > 0 {
+			err = fmt.Errorf("postRsvUseTs: %s %s\n", RsvMsg, ma[1])
+		} else {
+			fmt.Printf("postRsvUseTs: status not ok: >>>%s<<<\n", dat)
+			err = fmt.Errorf("postRsvUseTs: %s status not ok", RsvMsg)
+			return
+		}
+	} else {
+		fmt.Printf("postRsvUseTs: %s status ok\n", RsvMsg)
+	}
+
+	return
+}
+
+func getProps(opt options.Option) (props interface{}, notLogin, rsvTs, useTs bool, err error) {
 
 	header := map[string]string{}
 	if opt.NicoSession != "" {
@@ -2040,6 +2092,7 @@ func getProps(opt options.Option) (props interface{}, notLogin, tsRsv0, tsRsv1 b
 		return
 	}
 
+	// ログインアカウント種別取得
 	if ma := regexp.MustCompile(`member_status['"]*\s*[=:]\s*['"](.*?)['"]`).FindStringSubmatch(dat); len(ma) > 0 {
 		fmt.Println("account:", ma[1])
 	}
@@ -2047,6 +2100,7 @@ func getProps(opt options.Option) (props interface{}, notLogin, tsRsv0, tsRsv1 b
 		fmt.Println("account: not_login")
 	}
 
+	// 放送ページ取得
 	uri = fmt.Sprintf("https://live.nicovideo.jp/watch/%s", opt.NicoLiveId)
 	dat, _, _, err, neterr = getStringHeader(uri, header)
 	if err != nil || neterr != nil {
@@ -2055,30 +2109,38 @@ func getProps(opt options.Option) (props interface{}, notLogin, tsRsv0, tsRsv1 b
 		}
 		return
 	}
-	// 新配信 + nicocas
+
+	// 放送種別(official/channel/community)取得
+	var providertype string
+	// &quot;providerType&quot;: &quot;(.+)l&quot;,
+	if ma := regexp.MustCompile(`&quot;providerType&quot;:&quot;(\w+)&quot;`).FindStringSubmatch(dat); len(ma) > 0 {
+		providertype = ma[1]
+	}
+	fmt.Println("providertype:", providertype)
+
+	// 新配信
 	if regexp.MustCompile(`ご指定のページが見つかりませんでした`).MatchString(dat) {
-		err = fmt.Errorf("getProps error: page not found")
+		err = fmt.Errorf("getProps: page not found")
+	} else if regexp.MustCompile(`(放送者により削除されました|削除された可能性があります)`).MatchString(dat) {
+		err = fmt.Errorf("getProps: page not found")
 	} else if ma := regexp.MustCompile(`rejectedReasons&quot;:\[([^\]]+)\]`).FindStringSubmatch(dat); len(ma) > 0 {
 		ttt := strings.ReplaceAll(html.UnescapeString(ma[1]), "\",\"", " ")
-		err = fmt.Errorf("getProps error: %s", strings.Trim(ttt, "\""))
+		if !notLogin && providertype == "official" && regexp.MustCompile(`notHaveTimeshiftTicket`).MatchString(ttt) {
+			//チケット予約処理
+			fmt.Println("notHaveTimeshiftTicket: timeshift reservation required")
+			rsvTs = true
+		} else if !notLogin && providertype == "official" && regexp.MustCompile(`notUseTimeshiftTicket`).MatchString(ttt) {
+			//チケット使用処理
+			fmt.Println("notUseTimeshiftTicket: timeshift reservation required")
+			useTs = true
+		} else {
+			err = fmt.Errorf("getProps: %s", strings.Trim(ttt, "\""))
+		}
 	} else if regexp.MustCompile(`webSocketUrl&quot;:&quot;&quot;,`).MatchString(dat) {
-		err = fmt.Errorf("getProps error: webSocketUrl not found")
+		err = fmt.Errorf("getProps: webSocketUrl not found")
 	} else if ma := regexp.MustCompile(`data-props="(.+?)"`).FindStringSubmatch(dat); len(ma) > 0 {
 		str := html.UnescapeString(string(ma[1]))
 		if err = json.Unmarshal([]byte(str), &props); err != nil {
-			return
-		}
-		return
-	} else if regexp.MustCompile(`この番組は.{1,50}に終了`).MatchString(dat) {
-		// タイムシフト予約ボタン
-		if ma := regexp.MustCompile(`Nicolive\.WatchingReservation\.register`).FindStringSubmatch(dat); len(ma) > 0 {
-			fmt.Printf("timeshift reservation required\n")
-			tsRsv0 = true
-			return
-		}
-		if ma := regexp.MustCompile(`Nicolive\.WatchingReservation\.confirm`).FindStringSubmatch(dat); len(ma) > 0 {
-			fmt.Printf("timeshift reservation required\n")
-			tsRsv1 = true
 			return
 		}
 	} else {
@@ -2093,8 +2155,9 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin, reserved bool,
 	//http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 32
 
 	//var props interface{}
-	//var tsRsv bool
-	props, notLogin, tsRsv0, tsRsv1, err := getProps(opt)
+	//var rsvTs bool
+	//var useTs bool
+	props, notLogin, rsvTs, useTs, err := getProps(opt)
 	if err != nil {
 		//fmt.Println(err)
 		return
@@ -2111,12 +2174,14 @@ func NicoRecHls(opt options.Option) (done, playlistEnd, notLogin, reserved bool,
 	}
 
 	// TS予約必要
-	if (tsRsv0 || tsRsv1) && opt.NicoForceResv {
-		if tsRsv0 {
-			err = postTsRsv0(opt)
-		} else {
-			err = postTsRsv1(opt)
+	if (rsvTs || useTs) && opt.NicoForceResv {
+		if rsvTs {
+			err = postRsvUseTs(true, opt)
+			if (err != nil) {
+				return
+			}
 		}
+		err = postRsvUseTs(false, opt)
 		if err == nil {
 			reserved = true
 		}
