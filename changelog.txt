@@ -1,11 +1,27 @@
 ﻿更新履歴
 
-202xxxxx.42
+20221122.42
 ・録画済みのデータベース(sqlite3)の各種情報を表示するコマンド(-dbinfo)追加
-    ./livedl -dbinfo -- 'データーベースのファイル名をフルパスで'
+   $ livedl -dbinfo -- 'database filename(.sqlite3) with fullpath'
   - youtubeのデーターベースはcomment情報のみ表示
   - データベース情報表示、データベースextractの際DBをreadonlyで開くように修正
   - データベースファイルの存在チェックを追加
+・Refactoring
+   - 旧配信(RTMP)、実験放送のロジックを削除
+   - 不要なオプションの削除(options.go)
+      -nico-hls-only
+      -nico-rtmp-only  
+      -nico-rtmp-max-conn <num>
+      -nico-rtmp-index <num>[,<num>]
+   - 不要な変数(wsapi、broadcastId他)の削除、ソース整形(nico_hls.go、nico.go)
+   - ログインチェック及びページエラー処理を現状のニコ生に合わせて修正 getProps()
+   - -nico-loginを指定した場合-nico-login-only=onにしてconf.dbに保存するよう修正
+・録画時強制予約機能(-nico-force-reservation)修正
+  - タイムシフト録画時に予約されていない場合自動的に予約する(プレミア)
+  - 予約しているタイムシフト放送を録画時に自動的にチケット使用する
+  - TS予約/チケット使用APIのendpointを変更
+・httpbase内の全関数をcookiejar対応に変更
+・httpbase.SetTimeout()追加
 
 20221108.41
 ・直接ログインの２段階認証(MFA)対応
