@@ -137,6 +137,11 @@ func SetProxy(rawurl string) (err error) {
 	Client.Transport.(*http.Transport).Proxy = http.ProxyURL(u)
 	return
 }
+func SetTimeout(timeout int) (err error) {
+	err = nil
+	Client.Timeout = time.Duration(timeout) * time.Second
+	return
+}
 
 func httpBase(method, uri string, header map[string]string, jar *cookiejar.Jar, body io.Reader) (resp *http.Response, err, neterr error) {
 	req, err := http.NewRequest(method, uri, body)
@@ -167,14 +172,14 @@ func httpBase(method, uri string, header map[string]string, jar *cookiejar.Jar, 
 func Get(uri string, header map[string]string, jar *cookiejar.Jar) (*http.Response, error, error) {
 	return httpBase("GET", uri, header, jar, nil)
 }
-func PostForm(uri string, header map[string]string,jar *cookiejar.Jar, val url.Values) (*http.Response, error, error) {
+func PostForm(uri string, header map[string]string, jar *cookiejar.Jar, val url.Values) (*http.Response, error, error) {
 	if header == nil {
 		header = make(map[string]string)
 	}
 	header["Content-Type"] = "application/x-www-form-urlencoded; charset=utf-8"
 	return httpBase("POST", uri, header, jar, strings.NewReader(val.Encode()))
 }
-func reqJson(method, uri string, header map[string]string, data interface{}) (
+func reqJson(method, uri string, header map[string]string, jar *cookiejar.Jar, data interface{}) (
 	*http.Response, error, error) {
 	encoded, err := json.Marshal(data)
 	if err != nil {
@@ -186,22 +191,22 @@ func reqJson(method, uri string, header map[string]string, data interface{}) (
 	}
 	header["Content-Type"] = "application/json"
 
-	return httpBase(method, uri, header, nil, bytes.NewReader(encoded))
+	return httpBase(method, uri, header, jar, bytes.NewReader(encoded))
 }
-func PostJson(uri string, header map[string]string, data interface{}) (*http.Response, error, error) {
-	return reqJson("POST", uri, header, data)
+func PostJson(uri string, header map[string]string, jar *cookiejar.Jar, data interface{}) (*http.Response, error, error) {
+	return reqJson("POST", uri, header, jar, data)
 }
-func PutJson(uri string, header map[string]string, data interface{}) (*http.Response, error, error) {
-	return reqJson("PUT", uri, header, data)
+func PutJson(uri string, header map[string]string, jar *cookiejar.Jar, data interface{}) (*http.Response, error, error) {
+	return reqJson("PUT", uri, header, jar, data)
 }
-func PostData(uri string, header map[string]string, data io.Reader) (*http.Response, error, error) {
+func PostData(uri string, header map[string]string, jar *cookiejar.Jar, data io.Reader) (*http.Response, error, error) {
 	if header == nil {
 		header = make(map[string]string)
 	}
-	return httpBase("POST", uri, header, nil, data)
+	return httpBase("POST", uri, header, jar, data)
 }
-func GetBytes(uri string, header map[string]string) (code int, buff []byte, err, neterr error) {
-	resp, err, neterr := Get(uri, header, nil)
+func GetBytes(uri string, header map[string]string, jar *cookiejar.Jar) (code int, buff []byte, err, neterr error) {
+	resp, err, neterr := Get(uri, header, jar)
 	if err != nil {
 		return
 	}

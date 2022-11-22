@@ -77,7 +77,7 @@ MAINLOOP:
 			resp, err, neterr := httpbase.PostJson(uri, map[string]string {
 				"Cookie": Cookie,
 				"User-Agent": UserAgent,
-			}, postData)
+			}, nil, postData)
 			if err != nil {
 				return
 			}

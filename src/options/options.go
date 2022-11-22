@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 
 	"github.com/himananiito/livedl/buildno"
@@ -1228,7 +1227,7 @@ LB_ARG:
 	if opt.HttpTimeout == 0 {
 		opt.HttpTimeout = MinimumHttpTimeout
 	}
-	httpbase.Client.Timeout = time.Duration(opt.HttpTimeout) * time.Second
+	httpbase.SetTimeout(opt.HttpTimeout)
 
 	// [deprecated]
 	// load session info
