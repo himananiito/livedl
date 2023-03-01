@@ -53,7 +53,7 @@ var split = func(data []byte, atEOF bool) (advance int, token []byte, err error)
 
 func getChatContinuation(buff []byte) (isReplay bool, continuation string, err error) {
 
-	if ma := regexp.MustCompile(`(?s)\Wwindow\["ytInitialData"\]\p{Zs}*=\p{Zs}*({.*?})\p{Zs}*;`).FindSubmatch(buff); len(ma) > 1 {
+	if ma := regexp.MustCompile(`(?s)\WytInitialData\p{Zs}*=\p{Zs}*({.*?})\p{Zs}*;`).FindSubmatch(buff); len(ma) > 1 {
 		var data interface{}
 		err = json.Unmarshal(ma[1], &data)
 		if err != nil {
@@ -112,27 +112,27 @@ func getChatContinuation(buff []byte) (isReplay bool, continuation string, err e
 
 func getInfo(buff []byte) (title, ucid, author string, err error) {
 	var data interface{}
-	re := regexp.MustCompile(`(?s)\Wytplayer\.config\p{Zs}*=\p{Zs}*({.*?})\p{Zs}*;`)
+	re := regexp.MustCompile(`(?s)\WytInitialPlayerResponse\p{Zs}*=\p{Zs}*({.*?})\p{Zs}*;`)
 	if ma := re.FindSubmatch(buff); len(ma) > 1 {
 		str := html.UnescapeString(string(ma[1]))
 		if err = json.Unmarshal([]byte(str), &data); err != nil {
-			err = fmt.Errorf("ytplayer parse error")
+			err = fmt.Errorf("ytInitialPlayerResponse parse error")
 			return
 		}
 	} else {
-		err = fmt.Errorf("ytplayer.config not found")
+		err = fmt.Errorf("ytInitialPlayerResponse not found")
 		return
 	}
 
 	//objs.PrintAsJson(data); return
 
-	title, ok := objs.FindString(data, "args", "title")
+	title, ok := objs.FindString(data, "videoDetails", "title")
 	if !ok {
 		err = fmt.Errorf("title not found")
 		return
 	}
-	ucid, _ = objs.FindString(data, "args", "ucid")
-	author, _ = objs.FindString(data, "args", "author")
+	ucid, _ = objs.FindString(data, "videoDetails", "channelId")
+	author, _ = objs.FindString(data, "videoDetails", "author")
 	return
 }
 
@@ -299,13 +299,13 @@ func execYoutube_dl(gm *gorman.GoroutineManager, uri, name string) (err error) {
 
 var COMMENT_DONE = 1000
 
-func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
+func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool, ytCommentStart float64) (err error) {
 
 	uri := fmt.Sprintf("https://www.youtube.com/watch?v=%s", id)
 	code, buff, err, neterr := httpbase.GetBytes(uri, map[string]string{
 		"Cookie":     Cookie,
 		"User-Agent": UserAgent,
-	})
+	}, nil)
 	if err != nil {
 		return
 	}
@@ -390,7 +390,7 @@ func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
 
 	if continuation != "" {
 		gmCom.Go(func(c <-chan struct{}) int {
-			getComment(gmCom, ctx, c, isReplay, continuation, origName)
+			getComment(gmCom, ctx, c, isReplay, ytCommentStart, continuation, origName)
 			fmt.Printf("\ncomment done\n")
 			return COMMENT_DONE
 		})
@@ -424,7 +424,9 @@ func Record(id string, ytNoStreamlink, ytNoYoutube_dl bool) (err error) {
 			}
 
 		} else {
-			gmCom.Cancel()
+			if !ytNoStreamlink || !ytNoYoutube_dl {
+				gmCom.Cancel()
+			}
 			gmCom.Wait()
 		}
 	}

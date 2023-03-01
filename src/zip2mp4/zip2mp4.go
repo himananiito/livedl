@@ -21,6 +21,10 @@ import (
 	"github.com/himananiito/livedl/procs/ffmpeg"
 	"github.com/himananiito/livedl/youtube"
 	_ "github.com/mattn/go-sqlite3"
+
+	"context"
+	"github.com/gin-gonic/gin"
+	"net/http"
 )
 
 type ZipMp4 struct {
@@ -437,16 +441,36 @@ func Convert(fileName string) (err error) {
 	return
 }
 
-func ExtractChunks(fileName string, skipHb bool) (done bool, err error) {
-	db, err := sql.Open("sqlite3", fileName)
+func ExtractChunks(fileName string, skipHb, adjustVpos bool, seqnoStart, seqnoEnd int64) (done bool, err error) {
+	_, err = os.Stat(fileName)
+	if err != nil {
+		fmt.Println("sqlite3 file not found:")
+		return
+	}
+	db, err := sql.Open("sqlite3", "file:"+fileName+"?mode=ro&immutable=1")
 	if err != nil {
 		return
 	}
 	defer db.Close()
 
-	niconico.WriteComment(db, fileName, skipHb)
+	seqstart := niconico.DbGetFirstSeqNo(db, 1)
+	seqend   := niconico.DbGetLastSeqNo(db, 1)
+	var seqoffset int64
 
-	rows, err := db.Query(niconico.SelMedia)
+	if seqnoStart > 0 && seqnoStart > seqstart {
+		seqoffset = seqnoStart - seqstart // リアルタイム放送の開始時間の計算用
+		seqstart = seqnoStart
+	}
+	if seqnoEnd > 0 && seqnoEnd < seqend {
+		seqend = seqnoEnd
+	}
+	fmt.Println("seqstart: ", seqstart)
+	fmt.Println("seqoffset: ", seqoffset)
+	fmt.Println("seqend: ", seqend)
+
+	niconico.WriteComment(db, fileName, skipHb, adjustVpos, seqstart, seqend, seqoffset)
+
+	rows, err := db.Query(niconico.SelMediaF(seqstart, seqend))
 	if err != nil {
 		return
 	}
@@ -492,14 +516,34 @@ func ExtractChunks(fileName string, skipHb bool) (done bool, err error) {
 	return
 }
 
-func ConvertDB(fileName, ext string, skipHb bool) (done bool, nMp4s int, err error) {
-	db, err := sql.Open("sqlite3", fileName)
+func ConvertDB(fileName, ext string, skipHb, adjustVpos, forceConcat bool, seqnoStart, seqnoEnd int64) (done bool, nMp4s int, skipped bool, err error) {
+	_, err = os.Stat(fileName)
+	if err != nil {
+		fmt.Println("sqlite3 file not found:")
+		return
+	}
+	db, err := sql.Open("sqlite3", "file:"+fileName+"?mode=ro&immutable=1")
 	if err != nil {
 		return
 	}
 	defer db.Close()
 
-	niconico.WriteComment(db, fileName, skipHb)
+	seqstart := niconico.DbGetFirstSeqNo(db, 1)
+	seqend   := niconico.DbGetLastSeqNo(db, 1)
+	var seqoffset int64
+
+	if seqnoStart > 0 && seqnoStart > seqstart {
+		seqoffset = seqnoStart - seqstart // リアルタイム放送の開始時間の計算用
+		seqstart = seqnoStart
+	}
+	if seqnoEnd > 0 && seqnoEnd < seqend {
+		seqend = seqnoEnd
+	}
+	fmt.Println("seqstart: ", seqstart)
+	fmt.Println("seqoffset: ", seqoffset)
+	fmt.Println("seqend: ", seqend)
+
+	niconico.WriteComment(db, fileName, skipHb, adjustVpos, seqstart, seqend, seqoffset)
 
 	var zm *ZipMp4
 	defer func() {
@@ -512,7 +556,7 @@ func ConvertDB(fileName, ext string, skipHb bool) (done bool, nMp4s int, err err
 	zm = &ZipMp4{ZipName: fileName}
 	zm.OpenFFMpeg(ext)
 
-	rows, err := db.Query(niconico.SelMedia)
+	rows, err := db.Query(niconico.SelMediaF(seqstart, seqend))
 	if err != nil {
 		return
 	}
@@ -543,7 +587,10 @@ func ConvertDB(fileName, ext string, skipHb bool) (done bool, nMp4s int, err err
 			//	zm.CloseFFInput()
 			//	zm.Wait()
 			//}
-			zm.OpenFFMpeg(ext)
+			if ! forceConcat {
+				zm.OpenFFMpeg(ext)
+			}
+			skipped = true
 		}
 		prevBw = bw
 		prevIndex = seqno
@@ -563,13 +610,166 @@ func ConvertDB(fileName, ext string, skipHb bool) (done bool, nMp4s int, err err
 	return
 }
 
-func YtComment(fileName string) (done bool, err error) {
+func ReplayDB(fileName string, hlsPort int, seqnoStart int64) (err error) {
+	_, err = os.Stat(fileName)
+	if err != nil {
+		fmt.Println("sqlite3 file not found:")
+		return
+	}
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
 		return
 	}
 	defer db.Close()
 
-	youtube.WriteComment(db, fileName)
+	var isTimeshift bool
+	if m := regexp.MustCompile(`\(TS\)\.sqlite3$`).FindStringSubmatch(fileName); len(m) > 0 {
+		isTimeshift = true
+	}
+	fmt.Println("isTimeshift:", isTimeshift)
+
+	seqnoInit := seqnoStart
+
+	timeStart := time.Now()
+	timeLast := time.Now()
+
+	seqnoCurrent := seqnoStart
+
+	if (true) {
+		gin.SetMode(gin.ReleaseMode)
+		gin.DefaultErrorWriter = ioutil.Discard
+		gin.DefaultWriter = ioutil.Discard
+		router := gin.Default()
+
+		router.GET("", func(c *gin.Context) {
+			c.Redirect(http.StatusMovedPermanently, "/m3u8/2/0/index.m3u8")
+			c.Abort()
+		})
+
+		router.GET("/m3u8/:delay/:shift/index.m3u8", func(c *gin.Context) {
+			secPerSegment := 1.5
+			targetDuration := "2"
+			targetDurationFloat := 2.0
+			extInf := "1.5"
+			if isTimeshift {
+				secPerSegment = 5.0
+				targetDuration = "3"
+				targetDurationFloat = 3.0
+				extInf = "3.0"
+			}
+			shift, err := strconv.Atoi(c.Param("shift"))
+			if err != nil {
+				shift = 0
+			}
+			if shift < 0 {
+				shift = 0
+			}
+			delay, err := strconv.Atoi(c.Param("delay"))
+			if err != nil {
+				delay = 0
+			}
+			if delay < 2 {
+				delay = 2
+			}
+			if (! isTimeshift) {
+				if delay < 4 {
+					delay = 4
+				}
+			}
+			seqnoRewind := int64(delay)
+			timeout := targetDurationFloat * float64(delay + 1) * 2 + 1
+			timeNow := time.Now()
+			if float64(timeNow.Sub(timeLast) / time.Second) > timeout {
+				fmt.Printf("(%s) CONTINUE\n", timeNow.Format("15:04:05"))
+				seqnoStart = seqnoCurrent - seqnoRewind
+				if seqnoStart < seqnoInit {
+					seqnoStart = seqnoInit
+				}
+				timeStart = timeNow
+				seqnoCurrent = seqnoStart
+			} else {
+				seqnoCurrent = int64(float64(timeNow.Sub(timeStart) / time.Second) / secPerSegment) + seqnoStart
+			}
+			timeLast = timeNow
+			seqno := seqnoCurrent - int64(shift)
+			body := fmt.Sprintf(
+`#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:%s
+#EXT-X-MEDIA-SEQUENCE:%d
+
+`, targetDuration, seqno)
+			for i := int64(delay); i >= 0; i-- {
+				body += fmt.Sprintf(
+`#EXTINF:%s,
+/ts/%d/test.ts
+
+`, extInf, seqno - i)
+			}
+			if shift > 0 {
+				fmt.Printf("(%s) Current SeqNo: %d(-%d)\n", timeNow.Format("15:04:05"), seqnoCurrent, shift)
+			} else {
+				fmt.Printf("(%s) Current SeqNo: %d\n", timeNow.Format("15:04:05"), seqnoCurrent)
+			}
+			c.Data(http.StatusOK, "application/x-mpegURL", []byte(body))
+			return
+		})
+
+		router.GET("/ts/:idx/test.ts", func(c *gin.Context) {
+			i, _ := strconv.Atoi(c.Param("idx"))
+			var b []byte
+			db.QueryRow("SELECT data FROM media WHERE seqno = ?", i).Scan(&b)
+			c.Data(http.StatusOK, "video/MP2T", b)
+			return
+		})
+
+		srv := &http.Server{
+			Addr:           fmt.Sprintf("127.0.0.1:%d", hlsPort),
+			Handler:        router,
+			ReadTimeout:    10 * time.Second,
+			WriteTimeout:   10 * time.Second,
+			MaxHeaderBytes: 1 << 20,
+		}
+
+		chLocal := make(chan struct{})
+		idleConnsClosed := make(chan struct{})
+		defer func(){
+			close(chLocal)
+		}()
+		go func() {
+			select {
+			case <-chLocal:
+			}
+			if err := srv.Shutdown(context.Background()); err != nil {
+				log.Printf("srv.Shutdown: %v\n", err)
+			}
+			close(idleConnsClosed)
+		}()
+
+		// クライアントはlocalhostでなく127.0.0.1で接続すること
+		// localhostは遅いため
+		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+			log.Printf("srv.ListenAndServe: %v\n", err)
+		}
+
+		<-idleConnsClosed
+	}
+	
+	return
+}
+
+func YtComment(fileName string, ytemoji bool) (done bool, err error) {
+	_, err = os.Stat(fileName)
+	if err != nil {
+		fmt.Println("sqlite3 file not found:")
+		return
+	}
+	db, err := sql.Open("sqlite3", "file:"+fileName+"?mode=ro&immutable=1")
+	if err != nil {
+		return
+	}
+	defer db.Close()
+
+	youtube.WriteComment(db, fileName, ytemoji)
 	return
 }

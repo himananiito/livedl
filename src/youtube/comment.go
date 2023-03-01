@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
+	"html"
+	"io/ioutil"
+	"regexp"
 
 	"github.com/himananiito/livedl/files"
 	"github.com/himananiito/livedl/gorman"
@@ -20,7 +21,9 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan struct{}, isReplay bool, continuation, name string) (done bool) {
+type OBJ = map[string]interface{}
+
+func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan struct{}, isReplay bool, commentStart float64, continuation, name string) (done bool) {
 
 	dbName := files.ChangeExtention(name, "yt.sqlite3")
 	db, err := dbOpen(ctx, dbName)
@@ -33,11 +36,12 @@ func getComment(gm *gorman.GoroutineManager, ctx context.Context, sig <-chan str
 	mtx := &sync.Mutex{}
 
 	testContinuation, count, _ := dbGetContinuation(ctx, db, mtx)
-	if testContinuation != "" {
+	if commentStart < 0.5 && testContinuation != "" {
 		continuation = testContinuation
 	}
 
 	var printTime int64
+	var isFirst bool = true
 
 MAINLOOP:
 	for {
@@ -51,24 +55,50 @@ MAINLOOP:
 		timeoutMs, _done, err, neterr := func() (timeoutMs int, _done bool, err, neterr error) {
 			var uri string
 			if isReplay {
-				uri = fmt.Sprintf("https://www.youtube.com/live_chat_replay?continuation=%s&pbj=1", continuation)
+				uri = fmt.Sprintf("https://www.youtube.com/youtubei/v1/live_chat/get_live_chat_replay?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8")
 			} else {
-				uri = fmt.Sprintf("https://www.youtube.com/live_chat/get_live_chat?continuation=%s&pbj=1", continuation)
+				uri = fmt.Sprintf("https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8")
 			}
 
-			code, buff, err, neterr := httpbase.GetBytes(uri, map[string]string{
-				"Cookie":     Cookie,
+			postData := OBJ{
+				"context": OBJ{
+					"client": OBJ{
+						"clientName": "WEB",
+						"clientVersion": "2.20210128.02.00",
+					},
+				},
+				"continuation": continuation,
+			}
+			if !isFirst && isReplay && commentStart > 1.5 {
+				postData["currentPlayerState"] = OBJ{
+					"playerOffsetMs": commentStart * 1000.0,
+				}
+			}
+			resp, err, neterr := httpbase.PostJson(uri, map[string]string {
+				"Cookie": Cookie,
 				"User-Agent": UserAgent,
-			})
+			}, nil, postData)
 			if err != nil {
 				return
 			}
 			if neterr != nil {
 				return
 			}
-			if code != 200 {
-				neterr = fmt.Errorf("Status code: %v\n", code)
+			buff, neterr := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+			if neterr != nil {
 				return
+			}
+			code := resp.StatusCode
+			if code != 200 {
+				if code == 404 {
+					fmt.Printf("Status code: %v (ignored)\n", code)
+					time.Sleep(1000 * time.Millisecond)
+					return
+				} else {
+					neterr = fmt.Errorf("Status code: %v\n", code)
+					return
+				}
 			}
 
 			var data interface{}
@@ -78,13 +108,15 @@ MAINLOOP:
 				return
 			}
 
-			liveChatContinuation, ok := objs.Find(data, "response", "continuationContents", "liveChatContinuation")
+			liveChatContinuation, ok := objs.Find(data, "continuationContents", "liveChatContinuation")
 			if !ok {
 				err = fmt.Errorf("(response liveChatContinuation) not found")
 				return
 			}
 
-			if actions, ok := objs.FindArray(liveChatContinuation, "actions"); ok {
+			if isFirst && isReplay && commentStart > 1.5 {
+				isFirst = false
+			} else if actions, ok := objs.FindArray(liveChatContinuation, "actions"); ok {
 				var videoOffsetTimeMsec string
 
 				for _, a := range actions {
@@ -121,7 +153,24 @@ MAINLOOP:
 					if !ok {
 						continue
 					}
-					message, _ := objs.FindString(liveChatMessageRenderer, "message", "simpleText")
+					var message string
+					if runs, ok := objs.FindArray(liveChatMessageRenderer, "message", "runs"); ok {
+						for _, run := range runs {
+							if text, ok := objs.FindString(run, "text"); ok {
+								message += text
+							} else if emojis, ok := objs.FindArray(run, "emoji", "shortcuts"); ok {
+								if emoji, ok := emojis[0].(string); ok {
+									message += emoji
+								}
+							}
+						}
+					}
+					var others string
+					var amount string
+					amount, _ = objs.FindString(liveChatMessageRenderer, "purchaseAmountText", "simpleText")
+					if amount != "" {
+						others += ` amount="` + html.EscapeString(amount) +  `"`
+					}
 					timestampUsec, ok := objs.FindString(liveChatMessageRenderer, "timestampUsec")
 					if !ok {
 						continue
@@ -129,7 +178,7 @@ MAINLOOP:
 
 					if false {
 						fmt.Printf("%v ", videoOffsetTimeMsec)
-						fmt.Printf("%v %v %v %v %v\n", timestampUsec, authorName, authorExternalChannelId, message, id)
+						fmt.Printf("%v %v %v %v %v %v [%v ]\n", timestampUsec, count, authorName, authorExternalChannelId, message, id, others)
 					}
 
 					dbInsert(ctx, gm, db, mtx,
@@ -140,6 +189,7 @@ MAINLOOP:
 						authorExternalChannelId,
 						message,
 						continuation,
+						others,
 						count,
 					)
 					count++
@@ -263,6 +313,7 @@ func dbCreate(ctx context.Context, db *sql.DB) (err error) {
 		channelId           TEXT,
 		message             TEXT,
 		continuation        TEXT,
+		others              TEXT,
 		count               INTEGER NOT NULL
 	)
 	`)
@@ -272,9 +323,9 @@ func dbCreate(ctx context.Context, db *sql.DB) (err error) {
 
 	_, err = db.ExecContext(ctx, `
 	CREATE UNIQUE INDEX IF NOT EXISTS comment0 ON comment(id);
-	CREATE UNIQUE INDEX IF NOT EXISTS comment1 ON comment(timestampUsec);
-	CREATE UNIQUE INDEX IF NOT EXISTS comment2 ON comment(videoOffsetTimeMsec);
-	CREATE UNIQUE INDEX IF NOT EXISTS comment3 ON comment(count);
+	CREATE INDEX IF NOT EXISTS comment1 ON comment(timestampUsec);
+	CREATE INDEX IF NOT EXISTS comment2 ON comment(videoOffsetTimeMsec);
+	CREATE INDEX IF NOT EXISTS comment3 ON comment(count);
 	`)
 	if err != nil {
 		return
@@ -284,7 +335,7 @@ func dbCreate(ctx context.Context, db *sql.DB) (err error) {
 }
 
 func dbInsert(ctx context.Context, gm *gorman.GoroutineManager, db *sql.DB, mtx *sync.Mutex,
-	id, timestampUsec, videoOffsetTimeMsec, authorName, authorExternalChannelId, message, continuation string, count int) {
+	id, timestampUsec, videoOffsetTimeMsec, authorName, authorExternalChannelId, message, continuation, others string, count int) {
 
 	usec, err := strconv.ParseInt(timestampUsec, 10, 64)
 	if err != nil {
@@ -304,14 +355,14 @@ func dbInsert(ctx context.Context, gm *gorman.GoroutineManager, db *sql.DB, mtx 
 	}
 
 	query := `INSERT OR IGNORE INTO comment
-		(id, timestampUsec, videoOffsetTimeMsec, authorName, channelId, message, continuation, count) VALUES (?,?,?,?,?,?,?,?)`
+		(id, timestampUsec, videoOffsetTimeMsec, authorName, channelId, message, continuation, others, count) VALUES (?,?,?,?,?,?,?,?,?)`
 
 	gm.Go(func(<-chan struct{}) int {
 		mtx.Lock()
 		defer mtx.Unlock()
 
 		if _, err := db.ExecContext(ctx, query,
-			id, usec, offset, authorName, authorExternalChannelId, message, continuation, count,
+			id, usec, offset, authorName, authorExternalChannelId, message, continuation, others, count,
 		); err != nil {
 			if err.Error() != "context canceled" {
 				fmt.Println(err)
@@ -332,17 +383,57 @@ func dbGetContinuation(ctx context.Context, db *sql.DB, mtx *sync.Mutex) (res st
 	return
 }
 
+func DbGetCountComment(db *sql.DB) (res int64) {
+	db.QueryRow("SELECT COUNT(id) FROM comment").Scan(&res)
+	return
+}
+
+func ShowDbInfo(fileName string) (done bool, err error) {
+	_, err = os.Stat(fileName)
+	if err != nil {
+		fmt.Println("sqlite3 file not found:")
+		return
+	}
+	db, err := sql.Open("sqlite3", "file:"+fileName+"?mode=ro&immutable=1")
+	if err != nil {
+		return
+	}
+	defer db.Close()
+
+	fmt.Println("----- DATABASE info. -----")
+	fmt.Println("sqlite3 file :", fileName)
+	for _, tbl := range []string{"comment"} {
+		if !dbIsExistTable(db, tbl) {
+			fmt.Println("table", tbl, "not found")
+		} else {
+			fmt.Println("table", tbl, "exist")
+		}
+	}
+
+	comm_data := DbGetCountComment(db)
+	fmt.Println("----- comment info. -----")
+	fmt.Println("data: ", comm_data)
+
+	done = true
+
+	return
+}
+
 var SelComment = `SELECT
 	timestampUsec,
 	IFNULL(videoOffsetTimeMsec, -1),
 	authorName,
 	channelId,
-	message
+	message,
+	others,
+	count
 	FROM comment
 	ORDER BY timestampUsec
 `
 
-func WriteComment(db *sql.DB, fileName string) {
+func WriteComment(db *sql.DB, fileName string, emoji bool) {
+
+	regexp1 := regexp.MustCompile(":[a-zA-Z0-9\\-\\_]*:")
 
 	rows, err := db.Query(SelComment)
 	if err != nil {
@@ -352,15 +443,12 @@ func WriteComment(db *sql.DB, fileName string) {
 	defer rows.Close()
 
 	fileName = files.ChangeExtention(fileName, "xml")
-
-	dir := filepath.Dir(fileName)
-	base := filepath.Base(fileName)
-	base, err = files.GetFileNameNext(base)
+	fileName, err = files.GetFileNameNext(fileName)
+	fmt.Println("xml file: ", fileName)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	fileName = filepath.Join(dir, base)
 	f, err := os.Create(fileName)
 	if err != nil {
 		log.Fatalln(err)
@@ -377,6 +465,8 @@ func WriteComment(db *sql.DB, fileName string) {
 		var authorName string
 		var channelId string
 		var message string
+		var others string
+		var count int64
 
 		err = rows.Scan(
 			&timestampUsec,
@@ -384,6 +474,8 @@ func WriteComment(db *sql.DB, fileName string) {
 			&authorName,
 			&channelId,
 			&message,
+			&others,
+			&count,
 		)
 		if err != nil {
 			log.Println(err)
@@ -402,19 +494,37 @@ func WriteComment(db *sql.DB, fileName string) {
 		}
 
 		line := fmt.Sprintf(
-			`<chat vpos="%d" date="%d" date_usec="%d" user_id="%s"`,
+			`<chat vpos="%d" date="%d" date_usec="%d" user_id="%s" name="%s"%s no="%d"`,
 			vpos,
 			(timestampUsec / (1000 * 1000)),
 			(timestampUsec % (1000 * 1000)),
 			channelId,
+			html.EscapeString(authorName),
+			others,
+			count,
 		)
 
 		line += ">"
-		message = strings.Replace(message, "&", "&amp;", -1)
-		message = strings.Replace(message, "<", "&lt;", -1)
-		line += message
+		if emoji == false {
+			message = regexp1.ReplaceAllString(message, "")
+		}
+		if len(message) <= 0 {
+			message = "　"
+		}
+		line += html.EscapeString(message)
 		line += "</chat>"
 		fmt.Fprintf(f, "%s\r\n", line)
 	}
 	fmt.Fprintf(f, "%s\r\n", `</packet>`)
+}
+func dbIsExistTable(db *sql.DB, table_name string) (ret bool) {
+	var res int
+	ret = false
+	if len(table_name) > 0 {
+		db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE TYPE='table' AND name=?", table_name).Scan(&res)
+		if res > 0 {
+			ret = true
+		}
+	}
+	return
 }

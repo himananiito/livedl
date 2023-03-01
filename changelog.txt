@@ -1,5 +1,178 @@
 ﻿更新履歴
 
+20221122.42
+・録画済みのデータベース(sqlite3)の各種情報を表示するコマンド(-dbinfo)追加
+   $ livedl -dbinfo -- 'database filename(.sqlite3) with fullpath'
+  - youtubeのデーターベースはcomment情報のみ表示
+  - データベース情報表示、データベースextractの際DBをreadonlyで開くように修正
+  - データベースファイルの存在チェックを追加
+・Refactoring
+   - 旧配信(RTMP)、実験放送のロジックを削除
+   - 不要なオプションの削除(options.go)
+      -nico-hls-only
+      -nico-rtmp-only  
+      -nico-rtmp-max-conn <num>
+      -nico-rtmp-index <num>[,<num>]
+   - 不要な変数(wsapi、broadcastId他)の削除、ソース整形(nico_hls.go、nico.go)
+   - ログインチェック及びページエラー処理を現状のニコ生に合わせて修正 getProps()
+   - -nico-loginを指定した場合-nico-login-only=onにしてconf.dbに保存するよう修正
+・録画時強制予約機能(-nico-force-reservation)修正
+  - タイムシフト録画時に予約されていない場合自動的に予約する(プレミア)
+  - 予約しているタイムシフト放送を録画時に自動的にチケット使用する
+  - TS予約/チケット使用APIのendpointを変更
+・httpbase内の全関数をcookiejar対応に変更
+・httpbase.SetTimeout()追加
+
+20221108.41
+・直接ログインの２段階認証(MFA)対応
+・上記に伴うlogin APIのendpoint、cookie取得方法の変更
+・firefoxからのcookie取得機能追加
+  -nico-cookies firefox[:profile|cookiefile]
+  e.g.  
+  - profile default-release のcookieを取得
+      ./livedl -nico-cookies firefox
+  - profile NicoTaro のcookieを取得
+      ./livedl -nico-cookies firefox:NicoTaro 
+  - 直接cookiefileを指定
+      ./livedl -nico-cookies firefox:'C:/Users/*******/AppData/Roaming/Mozilla/Firefox/Profiles/*****/cookies.sqlite' 
+※Mac/Linuxで `cookies from browser failed: firefox profiles not found`が 表示される場合は報告おねがいします   
+※直接cookiefile指定の場合は必ず'か"で囲ってください  
+※プロファイルにspaceを含む場合は'か"で囲ってください  
+
+20220905.40
+・ニコ生のコメントのvposを補正
+  -nico-adjust-vpos=on
+     コメント書き出し時にvposの値を補正する
+     vposの値が-1000より小さい場合はコメント出力しない
+  -nico-adjust-vpos=off
+     コメント書き出し時にvposの値をそのまま出力する(デフォルト)
+  ※ExtractChunks()もコメントvposを補正するように修正
+  ※ニコ生の生放送を録画する際、再接続してもkvsテーブルは更新されません
+・Youtubeのコメントにemojiを出力する/しない
+  -yt-emoji=on
+     コメントにemojiを表示する(デフォルト)
+  -yt-emoji=off
+  コメントにemojiを表示しない
+・音声のみ録画対応
+　-nico-limit-bw に audio_high または audio_only を指定してください
+・-http-timeout の設定を保存するように修正
+・live2.* -> live.* に修正
+・その他主にコメント関連の修正
+  - livedl.exeとsqlite3ファイルが別のフォルダーにある場合、コメント出力時にxmlファイルに
+    -数字が付かなかったのを修正
+  - ニコ生の生放送の最初に取得するコメント数を1000から100に変更した(サーバー側の仕様による)
+
+20211017.39
+・livedlのあるディレクトリ以外から実行する時カレントディレクトリにconf.dbが作成されるのを修正
+https://egg.5ch.net/test/read.cgi/software/1595715643/922
+例: C:\bin\livedl\livedl.exe を D:\home\tmp をカレントディレクトリとして実行した場合、conf.dbは D:\home\tmp に作成されてしまう
+
+仕様：conf.dbは実行するlivedlと同じディレクトリに作成する
+      ただし、オプション -no-chdir が指定された場合はカレントディレクトリにconf.dbを作成する
+      (livedl実行ファイルがユーザ書き込み権限のないディレクトリにある場合を想定)
+
+20210607.38
+・livedl で YouTube Live のアーカイブコメントの取得開始時刻を指定するオプション
+https://egg.5ch.net/test/read.cgi/software/1595715643/789
+
+使用例：
+　livedl -yt-comment-start 3:21:06 https://～
+  特殊例 0：続きからコメント取得  1：最初からコメント取得
+
+・livedl で-yt-no-streamlink=on -yt-no-youtube-dl=on が指定されたとき、YouTube Live のコメントを永久に取得し続けるパッチ
+https://egg.5ch.net/test/read.cgi/software/1595715643/567
+
+・livedl を YouTube Live の直近の仕様変更に対応
+https://egg.5ch.net/test/read.cgi/software/1595715643/559
+
+・金額のフォーマットの要望ないみたいだからこっちで勝手に決めさせてもらったよ
+https://egg.5ch.net/test/read.cgi/software/1595715643/543
+
+Youtube Liveのコメントにamount属性を追加
+
+・livedl で YouTubeLive リプレイのコメントが取れるよう直したよ
+https://egg.5ch.net/test/read.cgi/software/1595715643/523
+
+Youtube Liveのコメントが途中で切れるのを修正
+Youtube liveのアーカイブダウンロード中に`json decode error'となり中断するのを修正
+(404エラーになる場合は少しwaitする)
+
+20210524.37
+・2021/01/01までに5chで公開されたniconico関係の全てのパッチを適用
+
+・livedl で一部コメントが保存されないのを修正するパッチ
+https://egg.5ch.net/test/read.cgi/software/1595715643/457
+　vposが0またはdate_usecが0の場合その要素自体が存在しないのでエラーになりコメントが保存されないのを修正
+
+・livedl で YouTube Live を扱えるようにするためのパッチ（リビジョン1）
+patch は livedl.youtube-r1.patch のみ適用
+https://egg.5ch.net/test/read.cgi/software/1595715643/402
+https://egg.5ch.net/test/read.cgi/software/1595715643/406
+
+・livedl で HTTP のタイムアウト時間を変更できるようにするパッチ
+https://egg.5ch.net/test/read.cgi/software/1595715643/272
+
+・XMLコメントのname属性(出演者が名前付きのコメントする時に使用)を保存するように修正
+https://egg.5ch.net/test/read.cgi/software/1595715643/174
+patch は livedl.comment-name-attribute-r1.patch.gz のみ適用
+https://egg.5ch.net/test/read.cgi/software/1595715643/194
+
+・指定時間でタイムシフト録画を停止するためのパッチ（＋α）
+https://egg.5ch.net/test/read.cgi/software/1595715643/163
+
+オプション
+　-nico-ts-start ＜num＞
+　　タイムシフトの録画を指定した再生時間（秒）から開始する
+　-nico-ts-stop ＜num＞
+　　タイムシフトの録画を指定した再生時間（秒）で停止する
+　上記2つは ＜分＞:＜秒＞ | ＜時＞:＜分＞:＜秒＞ の形式でも指定可能
+
+　-nico-ts-start-min ＜num＞
+　　タイムシフトの録画を指定した再生時間（分）から開始する
+　-nico-ts-stop-min ＜num＞
+　　タイムシフトの録画を指定した再生時間（分）で停止する
+　上記2つは ＜時＞:＜分＞ の形式でも指定可能
+
+・セルフ追っかけ再生機能その他
+https://egg.5ch.net/test/read.cgi/software/1595715643/57
+　例：http://127.0.0.1:12345/m3u8/2/1200/index.m3u8
+　　現在のシーケンス番号から1200セグメント（リアルタイムの場合30分）戻ったところを再生
+
+・追加オプション
+　-nico-conv-seqno-start ＜num＞
+　　MP4への変換を指定したセグメント番号から開始する
+　-nico-conv-seqno-end ＜num＞
+　　MP4への変換を指定したセグメント番号で終了する
+　-nico-conv-force-concat
+　　MP4への変換で画質変更または抜けがあっても分割しないように設定
+　-nico-conv-force-concat=on
+　　(+) 上記を有効に設定
+　-nico-conv-force-concat=off
+　　(+) 上記を無効に設定(デフォルト)
+
+・　-d2h
+　　[実験的] 録画済みのdb(.sqlite3)を視聴するためのHLSサーバを立てる(-db-to-hls)
+　　　開始シーケンス番号は（変換ではないが） -nico-conv-seqno-start で指定
+　　　　使用例：$ livedl lvXXXXXXXXX.sqlite3 -d2h -nico-hls-port 12345 -nico-conv-seqno-start 2780
+
+20210516.36
+・fix タイムシフト録画時に'getwaybackkey: waybackkey not found' と表示されコメントが保存されない(nnn-revo2012 PR#54)
+　- コメントサーバー仕様変更に対応(threadId、waybackkey廃止など)(2020/07/27)
+　　5chで公開されたID:jM/9Q+5+0作成のpatchを適用
+　　https://egg.5ch.net/test/read.cgi/software/1570634489/932
+　- livedl で waybackkey の取得方法を変更するパッチ
+　　https://egg.5ch.net/test/read.cgi/software/1595715643/424
+
+・ニコニコ仕様変更を反映（#49 5chボランティア (sangwon-jung-work PR#51)
+　- 放送情報取得時のwebsocketプロトコルが変わって録画できなくなったのを修正(2020/06/02)
+　　5chで公開されたID:jM/9Q+5+0作成のpatchを適用
+　　http://egg.5ch.net/test/read.cgi/software/1570634489/535
+　- fix broadcastId not found error, add debug log
+
+・20181215.35以降の修正を追加
+・TS録画時にセグメント抜けが起こるのを修正 (PR#47)
+・http -> httpsに修正 (PR#39)
+
 20181215.35
 ・-nico-ts-start-minオプションの追加
 ・win32bit版のビルドを追加

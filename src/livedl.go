@@ -45,16 +45,35 @@ func main() {
 		baseDir = filepath.Dir(pa)
 	}
 
-	opt := options.ParseArgs()
+	// check option only -no-chdir
+	args := os.Args[1:]
+	nochdir := false
+	r := regexp.MustCompile(`\A(?i)--?no-?chdir\z`)
+	for _, s := range args {
+		if r.MatchString(s) {
+			nochdir = true
+			break
+		}
+	}
 
 	// chdir if not disabled
-	if !opt.NoChdir {
+	if !nochdir {
 		fmt.Printf("chdir: %s\n", baseDir)
 		if e := os.Chdir(baseDir); e != nil {
 			fmt.Println(e)
 			return
 		}
+	} else {
+		fmt.Printf("no chdir\n")
+		pwd, e := os.Getwd()
+		if e != nil {
+			fmt.Println(e)
+			return
+		}
+		fmt.Printf("read %s\n", filepath.FromSlash(pwd+"/conf.db"))
 	}
+
+	opt := options.ParseArgs()
 
 	// http
 	if opt.HttpRootCA != "" {
@@ -129,7 +148,7 @@ func main() {
 		}
 
 	case "YOUTUBE":
-		err := youtube.Record(opt.YoutubeId, opt.YtNoStreamlink, opt.YtNoYoutubeDl)
+		err := youtube.Record(opt.YoutubeId, opt.YtNoStreamlink, opt.YtNoYoutubeDl, opt.YtCommentStart)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -141,17 +160,17 @@ func main() {
 			os.Exit(1)
 		}
 		if hlsPlaylistEnd && opt.NicoAutoConvert {
-			done, nMp4s, err := zip2mp4.ConvertDB(dbname, opt.ConvExt, opt.NicoSkipHb)
+			done, nMp4s, skipped, err := zip2mp4.ConvertDB(dbname, opt.ConvExt, opt.NicoSkipHb, opt.NicoAdjustVpos, opt.NicoConvForceConcat, opt.NicoConvSeqnoStart, opt.NicoConvSeqnoEnd)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
 			if done {
-				if nMp4s == 1 {
+				if nMp4s == 1 && (! skipped) {
 					if 1 <= opt.NicoAutoDeleteDBMode {
 						os.Remove(dbname)
 					}
-				} else if 1 < nMp4s {
+				} else if 1 < nMp4s || (nMp4s == 1 && skipped) {
 					if 2 <= opt.NicoAutoDeleteDBMode {
 						os.Remove(dbname)
 					}
@@ -172,20 +191,45 @@ func main() {
 
 	case "DB2MP4":
 		if strings.HasSuffix(opt.DBFile, ".yt.sqlite3") {
-			zip2mp4.YtComment(opt.DBFile)
+			zip2mp4.YtComment(opt.DBFile, opt.YtEmoji)
 
 		} else if opt.ExtractChunks {
-			if _, err := zip2mp4.ExtractChunks(opt.DBFile, opt.NicoSkipHb); err != nil {
+			if _, err := zip2mp4.ExtractChunks(opt.DBFile, opt.NicoSkipHb, opt.NicoAdjustVpos, opt.NicoConvSeqnoStart, opt.NicoConvSeqnoEnd); err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
 
 		} else {
-			if _, _, err := zip2mp4.ConvertDB(opt.DBFile, opt.ConvExt, opt.NicoSkipHb); err != nil {
+			if _, _, _, err := zip2mp4.ConvertDB(opt.DBFile, opt.ConvExt, opt.NicoSkipHb, opt.NicoAdjustVpos, opt.NicoConvForceConcat, opt.NicoConvSeqnoStart, opt.NicoConvSeqnoEnd); err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
 		}
+
+	case "DB2HLS":
+		if opt.NicoHlsPort == 0 {
+			fmt.Println("HLS port not specified")
+			os.Exit(1)
+		}
+		if err := zip2mp4.ReplayDB(opt.DBFile, opt.NicoHlsPort, opt.NicoConvSeqnoStart); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+	case "DBINFO":
+		if strings.HasSuffix(opt.DBFile, ".yt.sqlite3") {
+			if _, err := youtube.ShowDbInfo(opt.DBFile); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+		} else {
+			if _, err := niconico.ShowDbInfo(opt.DBFile, opt.ConvExt); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+		}
+
 	}
 
 	return

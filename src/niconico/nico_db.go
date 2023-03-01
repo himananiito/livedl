@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,6 +25,7 @@ var SelComment = `SELECT
 	user_id,
 	content,
 	IFNULL(mail, "") AS mail,
+	%s
 	IFNULL(premium, 0) AS premium,
 	IFNULL(score, 0) AS score,
 	thread,
@@ -33,6 +33,17 @@ var SelComment = `SELECT
 	IFNULL(locale, "") AS locale
 	FROM comment
 	ORDER BY date2`
+
+func SelMediaF(seqnoStart, seqnoEnd int64) (ret string) {
+	ret = `SELECT
+	seqno, bandwidth, size, data FROM media
+	WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL`
+	ret += ` AND seqno >= ` + fmt.Sprint(seqnoStart)
+	ret += ` AND seqno <= ` + fmt.Sprint(seqnoEnd)
+	ret += ` ORDER BY seqno`
+
+	return
+}
 
 func (hls *NicoHls) dbOpen() (err error) {
 	db, err := sql.Open("sqlite3", hls.dbName)
@@ -102,6 +113,7 @@ func (hls *NicoHls) dbCreate() (err error) {
 		user_id   TEXT NOT NULL,
 		content   TEXT NOT NULL,
 		mail      TEXT,
+		name      TEXT,
 		premium   INTEGER,
 		score     INTEGER,
 		thread    TEXT,
@@ -216,6 +228,36 @@ func (hls *NicoHls) dbKVSet(k string, v interface{}) {
 	})
 }
 
+func (hls *NicoHls) dbKVExist(k string) (res int){
+	hls.dbMtx.Lock()
+	defer hls.dbMtx.Unlock()
+	query := `SELECT COUNT(*) FROM kvs WHERE k = ?`
+	hls.db.QueryRow(query, k).Scan(&res)
+	return
+}
+
+func DbKVGet(db *sql.DB) (data map[string]interface{}) {
+	data = make(map[string]interface{})
+	rows, err := db.Query(`SELECT k,v FROM kvs`)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var k	string
+		var v	interface{}
+		err := rows.Scan(&k, &v)
+		if err != nil {
+			log.Println(err)
+		}
+		data[k] = v
+	}
+
+	return
+}
+
 func (hls *NicoHls) dbInsertReplaceOrIgnore(table string, data map[string]interface{}, replace bool) {
 	var keys []string
 	var qs []string
@@ -272,7 +314,7 @@ func (hls *NicoHls) dbGetFromWhen() (res_from int, when float64) {
 		var endTime float64
 		hls.db.QueryRow(`SELECT v FROM kvs WHERE k = "endTime"`).Scan(&endTime)
 
-		when = endTime
+		when = endTime + 3600
 	} else {
 		when = float64(date2) / (1000 * 1000)
 	}
@@ -280,9 +322,69 @@ func (hls *NicoHls) dbGetFromWhen() (res_from int, when float64) {
 	return
 }
 
-func WriteComment(db *sql.DB, fileName string, skipHb bool) {
+func dbadjustVpos(opentime, offset, date, vpos int64, providerType string) (ret int64) {
+	ret = vpos
+	if providerType != "official" {
+		ret = (date - opentime) * 100 - offset
+	} else {
+		ret = vpos - offset
+	}
+	return ret
+}
 
-	rows, err := db.Query(SelComment)
+func dbGetCommentRevision(db *sql.DB) (commentRevision int) {
+	commentRevision = 0
+	var nameCount int64
+	db.QueryRow(`SELECT COUNT(name) FROM pragma_table_info('comment') WHERE name = 'name'`).Scan(&nameCount)
+	if nameCount > 0 {
+		commentRevision = 1
+	}
+	return
+}
+
+func WriteComment(db *sql.DB, fileName string, skipHb, adjustVpos bool, seqnoStart, seqnoEnd, seqOffset int64) {
+
+	var fSelComment = func(revision int) string {
+		var selAppend string
+		if revision >= 1 {
+			selAppend += `IFNULL(name, "") AS name,`
+		}
+		return fmt.Sprintf(SelComment, selAppend)
+	}
+
+	commentRevision :=  dbGetCommentRevision(db)
+	fmt.Println("commentRevision: ", commentRevision)
+
+	//adjustVposの場合はkvsテーブルから読み込み
+	var openTime int64
+	var providerType string
+	var offset int64
+	kvs := DbKVGet(db)
+	if adjustVpos == true {
+		var t float64
+		var sts string
+		var serverTime int64
+		t = kvs["serverTime"].(float64)
+		serverTime = int64(t)
+		t = kvs["openTime"].(float64)
+		openTime = int64(t)
+		sts = kvs["status"].(string)
+		if sts == "ENDED" {
+			offset = seqnoStart * 500 //timeshift
+		} else {
+			offset = (serverTime/10) - (openTime*100) + (seqOffset*150) //on_air
+		}
+		providerType = kvs["providerType"].(string)
+		//fmt.Println("serverTime: ", serverTime)
+		fmt.Println("status: ", sts)
+	}
+
+	fmt.Println("adjustVpos: ", adjustVpos)
+	fmt.Println("providerType: ", providerType)
+	//fmt.Println("openTime: ", openTime)
+	//fmt.Println("offset: ", offset)
+
+	rows, err := db.Query(fSelComment(commentRevision))
 	if err != nil {
 		log.Println(err)
 		return
@@ -290,15 +392,12 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 	defer rows.Close()
 
 	fileName = files.ChangeExtention(fileName, "xml")
-
-	dir := filepath.Dir(fileName)
-	base := filepath.Base(fileName)
-	base, err = files.GetFileNameNext(base)
+	fileName, err = files.GetFileNameNext(fileName)
+	fmt.Println("xml file: ", fileName)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	fileName = filepath.Join(dir, base)
 	f, err := os.Create(fileName)
 	if err != nil {
 		log.Fatalln(err)
@@ -316,12 +415,13 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 		var user_id string
 		var content string
 		var mail string
+		var name string
 		var premium int64
 		var score int64
 		var thread string
 		var origin string
 		var locale string
-		err = rows.Scan(
+		var dest0 = []interface{} {
 			&vpos,
 			&date,
 			&date_usec,
@@ -330,12 +430,19 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 			&user_id,
 			&content,
 			&mail,
+		}
+		var dest1 = []interface{} {
 			&premium,
 			&score,
 			&thread,
 			&origin,
 			&locale,
-		)
+		}
+		if commentRevision >= 1 {
+			dest0 = append(dest0, &name)
+		}
+		var dest = append(dest0, dest1...)
+		err = rows.Scan(dest...)
 		if err != nil {
 			log.Println(err)
 			return
@@ -346,8 +453,13 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 			continue
 		}
 
-		if vpos < 0 {
-			continue
+		// adjustVposの場合はvpos再計算
+		// vposが-1000(-10秒)より小さい場合は出力しない
+		if adjustVpos == true {
+			vpos = dbadjustVpos(openTime, offset, date, vpos, providerType)
+			if vpos <= -1000 {
+				continue
+			}
 		}
 
 		line := fmt.Sprintf(
@@ -370,6 +482,12 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 			mail = strings.Replace(mail, "&", "&amp;", -1)
 			mail = strings.Replace(mail, "<", "&lt;", -1)
 			line += fmt.Sprintf(` mail="%s"`, mail)
+		}
+		if name != "" {
+			name = strings.Replace(name, `"`, "&quot;", -1)
+			name = strings.Replace(name, "&", "&amp;", -1)
+			name = strings.Replace(name, "<", "&lt;", -1)
+			line += fmt.Sprintf(` name="%s"`, name)
 		}
 		if origin != "" {
 			origin = strings.Replace(origin, `"`, "&quot;", -1)
@@ -399,6 +517,75 @@ func WriteComment(db *sql.DB, fileName string, skipHb bool) {
 	fmt.Fprintf(f, "%s\r\n", `</packet>`)
 }
 
+func ShowDbInfo(fileName, ext string) (done bool, err error) {
+	_, err = os.Stat(fileName)
+	if err != nil {
+		fmt.Println("sqlite3 file not found:")
+		return
+	}
+	db, err := sql.Open("sqlite3", "file:"+fileName+"?mode=ro&immutable=1")
+	if err != nil {
+		return
+	}
+	defer db.Close()
+
+	fmt.Println("----- DATABASE info. -----")
+	fmt.Println("sqlite3 file :", fileName)
+	for _, tbl := range []string{"kvs", "media", "comment"} {
+		if !dbIsExistTable(db, tbl) {
+			fmt.Println("table", tbl, "not found")
+		} else {
+			fmt.Println("table", tbl, "exist")
+		}
+	}
+
+	fmt.Println("----- broadcast info. -----")
+	kvs := DbKVGet(db)
+	if len(kvs) > 0 {
+		id := kvs["nicoliveProgramId"].(string)
+		title :=  kvs["title"].(string)
+		sts :=  kvs["status"].(string)
+		ptype :=  kvs["providerType"].(string)
+		open :=  int64(kvs["openTime"].(float64))
+		begin :=  int64(kvs["beginTime"].(float64))
+		end :=  int64(kvs["endTime"].(float64))
+		username :=  kvs["userName"].(string)
+
+		fmt.Println("id: ", id)
+		fmt.Println("title: ", title)
+		fmt.Println("username: ", username)
+		fmt.Println("providerType: ", ptype)
+		fmt.Println("status: ", sts)
+		fmt.Println("openTime: ", time.Unix(open, 0))
+		if ptype == "official" {
+			fmt.Println("beginTime: ", time.Unix(begin, 0))
+		}
+		fmt.Println("endTime: ", time.Unix(end, 0))
+	} else {
+		fmt.Println("kvs data not found")
+	}
+	commentRevision :=  dbGetCommentRevision(db)
+	fmt.Println("commentRevision: ", commentRevision)
+
+	media_all  := DbGetCountMedia(db , 0)
+	media_err  := DbGetCountMedia(db , 2)
+	media_sseq := DbGetFirstSeqNo(db , 0)
+	media_eseq := DbGetLastSeqNo(db , 0)
+	comm_data := DbGetCountComment(db)
+
+	fmt.Println("----- media info. -----")
+	fmt.Println("start seqno: ", media_sseq)
+	fmt.Println("end seqno: ", media_eseq)
+	fmt.Println("data: ", media_all, "(media:", media_all - media_err, "err:", media_err, ")")
+
+	fmt.Println("----- comment info. -----")
+	fmt.Println("data: ", comm_data)
+
+	done = true
+
+	return
+}
+
 // ts
 func (hls *NicoHls) dbGetLastMedia(i int) (res []byte) {
 	hls.dbMtx.Lock()
@@ -406,9 +593,63 @@ func (hls *NicoHls) dbGetLastMedia(i int) (res []byte) {
 	hls.db.QueryRow("SELECT data FROM media WHERE seqno = ?", i).Scan(&res)
 	return
 }
-func (hls *NicoHls) dbGetLastSeqNo() (res int64) {
+//
+func (hls *NicoHls) dbGetLastSeqNo(flg int) (res int64) {
 	hls.dbMtx.Lock()
 	defer hls.dbMtx.Unlock()
-	hls.db.QueryRow("SELECT seqno FROM media ORDER BY seqno DESC LIMIT 1").Scan(&res)
+	var sql string
+	if flg == 1 {
+		sql = "SELECT seqno FROM media WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL ORDER BY seqno DESC LIMIT 1"
+	} else {
+		sql = "SELECT seqno FROM media ORDER BY seqno DESC LIMIT 1"
+	}
+	hls.db.QueryRow(sql).Scan(&res)
+	return
+}
+func DbGetLastSeqNo(db *sql.DB, flg int) (res int64) {
+	var sql string
+	if flg == 1 {
+		sql = "SELECT seqno FROM media WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL ORDER BY seqno DESC LIMIT 1"
+	} else {
+		sql = "SELECT seqno FROM media ORDER BY seqno DESC LIMIT 1"
+	}
+	db.QueryRow(sql).Scan(&res)
+	return
+}
+func DbGetFirstSeqNo(db *sql.DB, flg int) (res int64) {
+	var sql string
+	if flg == 1 {
+		sql = "SELECT seqno FROM media WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL ORDER BY seqno ASC LIMIT 1"
+	} else {
+		sql = "SELECT seqno FROM media ORDER BY seqno ASC LIMIT 1"
+	}
+	db.QueryRow(sql).Scan(&res)
+	return
+}
+func DbGetCountMedia(db *sql.DB, flg int) (res int64) {
+	var sql string
+	if flg == 1 {
+		sql = "SELECT COUNT(seqno) FROM media WHERE IFNULL(notfound, 0) == 0 AND data IS NOT NULL"
+	} else if flg == 2 {
+		sql = "SELECT COUNT(seqno) FROM media WHERE IFNULL(notfound, 0) != 0 OR data IS NULL"
+	} else {
+		sql = "SELECT COUNT(seqno) FROM media"
+	}
+	db.QueryRow(sql).Scan(&res)
+	return
+}
+func DbGetCountComment(db *sql.DB) (res int64) {
+	db.QueryRow("SELECT COUNT(date) FROM comment").Scan(&res)
+	return
+}
+func dbIsExistTable(db *sql.DB, table_name string) (ret bool) {
+	var res int
+	ret = false
+	if len(table_name) > 0 {
+		db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE TYPE='table' AND name=?", table_name).Scan(&res)
+		if res > 0 {
+			ret = true
+		}
+	}
 	return
 }

@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	_ "net/http/pprof"
 	"net/url"
 	"os"
@@ -21,7 +22,16 @@ import (
 	"github.com/himananiito/livedl/options"
 )
 
+func joinCookie(cookies []*http.Cookie) (result string) {
+	result = ""
+	for _, v := range cookies {
+		result += v.String() + "; "
+	}
+	return result
+}
+
 func NicoLogin(opt options.Option) (err error) {
+
 	id, pass, _, _ := options.LoadNicoAccount(opt.NicoLoginAlias)
 
 	if id == "" || pass == "" {
@@ -29,10 +39,19 @@ func NicoLogin(opt options.Option) (err error) {
 		return
 	}
 
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return
+	}
+
 	resp, err, neterr := httpbase.PostForm(
-		"https://account.nicovideo.jp/api/v1/login",
-		nil,
-		url.Values{"mail_tel": {id}, "password": {pass}, "site": {"nicoaccountsdk"}},
+		"https://account.nicovideo.jp/login/redirector?show_button_twitter=1&site=niconico&show_button_facebook=1&next_url=%2F",
+		map[string]string{
+			"Origin":  "https://account.nicovideo.jp",
+			"Referer": "https://account.nicovideo.jp/login",
+		},
+		jar,
+		url.Values{"mail_tel": {id}, "password": {pass}},
 	)
 	if err != nil {
 		return
@@ -43,18 +62,112 @@ func NicoLogin(opt options.Option) (err error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return
+	// cookieによって判定
+	if opt.NicoDebug {
+		fmt.Fprintf(os.Stderr, "%v\n", resp.Request.Response.Header)
+		fmt.Fprintln(os.Stderr, "StatusCode:", resp.StatusCode)
 	}
-
-	if ma := regexp.MustCompile(`<session_key>(.+?)</session_key>`).FindSubmatch(body); len(ma) > 0 {
+	//fmt.Println("StatusCode:", resp.Request.Response.StatusCode) // 302
+	set_cookie_url, _ := url.Parse("https://www.nicovideo.jp/")
+	cookie := joinCookie(jar.Cookies(set_cookie_url))
+	if opt.NicoDebug {
+		fmt.Fprintln(os.Stderr, "cookie:", cookie)
+	}
+	var body []byte
+	if ma := regexp.MustCompile(`mfa_session=`).FindStringSubmatch(cookie); len(ma) > 0 {
+		//2段階認証処理
+		fmt.Println("login MFA(2FA)")
+		loc := resp.Request.Response.Header.Values("Location")[0]
+		//fmt.Fprintln(os.Stderr, "Location:",loc)
+		resp, err, neterr = httpbase.Get(
+			loc,
+			map[string]string{
+				"Origin":  "https://account.nicovideo.jp",
+				"Referer": "https://account.nicovideo.jp/login",
+			},
+			jar)
+		if err != nil {
+			err = fmt.Errorf("login MFA error")
+			return
+		}
+		if neterr != nil {
+			err = neterr
+			return
+		}
+		body, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			err = fmt.Errorf("login MFA read error 1")
+			return
+		}
+		//fmt.Printf("%s", body)
+		str := string(body)
+		if ma = regexp.MustCompile(`/mfa\?site=niconico`).FindStringSubmatch(str); len(ma) <= 0 {
+			err = fmt.Errorf("login MFA read error 2")
+			return
+		}
+		//actionから抜き出して loc にセット
+		if ma = regexp.MustCompile(`form action=\"([^\"]+)\"`).FindStringSubmatch(str); len(ma) <= 0 {
+			err = fmt.Errorf("login MFA read error 3")
+			return
+		}
+		loc = "https://account.nicovideo.jp" + ma[1]
+		if opt.NicoDebug {
+			fmt.Fprintln(os.Stderr, "Location:", loc)
+		}
+		//6 digits code を入力
+		otp := ""
+		retry := 3
+		for retry > 0 {
+			fmt.Println("Enter 6 digits code (CANCEL: c/q/x):")
+			fmt.Scan(&otp) // データを格納する変数のアドレスを指定
+			//p = Pattern.compile("^[0-9]{6}$");
+			if ma = regexp.MustCompile(`[cqxCQX]{1}`).FindStringSubmatch(otp); len(ma) > 0 {
+				err = fmt.Errorf("login MFA : cancel")
+				return
+			}
+			if ma = regexp.MustCompile(`^[0-9]{6}$`).FindStringSubmatch(otp); len(ma) > 0 {
+				retry = 99
+				break
+			}
+			retry--
+		}
+		//fmt.Println("code:",otp)
+		if retry <= 0 {
+			err = fmt.Errorf("login MFA : wrong digits code")
+			return
+		}
+		resp, err, neterr = httpbase.PostForm(
+			loc,
+			map[string]string{
+				"Origin":  "https://account.nicovideo.jp",
+				"Referer": "https://account.nicovideo.jp/login",
+			},
+			jar,
+			url.Values{"otp": {otp}},
+		)
+		if err != nil {
+			err = fmt.Errorf("login MFA POST error")
+			return
+		}
+		if neterr != nil {
+			err = neterr
+			return
+		}
+		//結果が302
+		cookie = joinCookie(jar.Cookies(set_cookie_url))
+		//fmt.Fprintln("StatusCode:", resp.Request.Response.StatusCode) // 302
+		if opt.NicoDebug {
+			fmt.Fprintln(os.Stderr, "StatusCode:", resp.StatusCode)
+			fmt.Fprintln(os.Stderr, "MFA cookie:", cookie)
+		}
+	}
+	//Cookieからuser_sessionの値を読み込む
+	if ma := regexp.MustCompile(`user_session=(user_session_.+?);`).FindStringSubmatch(cookie); len(ma) > 0 {
+		fmt.Println("session_key: ", string(ma[1]))
 		options.SetNicoSession(opt.NicoLoginAlias, string(ma[1]))
-
 		fmt.Println("login success")
 	} else {
 		err = fmt.Errorf("login failed: session_key not found")
-		return
 	}
 	return
 }
@@ -63,46 +176,34 @@ func Record(opt options.Option) (hlsPlaylistEnd bool, dbName string, err error) 
 
 	for i := 0; i < 2; i++ {
 		// load session info
-		if opt.NicoSession == "" || i > 0 {
-			_, _, opt.NicoSession, _ = options.LoadNicoAccount(opt.NicoLoginAlias)
-		}
-
-		if !opt.NicoRtmpOnly {
-			var done bool
-			var notLogin bool
-			var reserved bool
-			done, hlsPlaylistEnd, notLogin, reserved, dbName, err = NicoRecHls(opt)
-			if done {
-				return
-			}
+		if opt.NicoCookies != "" {
+			opt.NicoSession, err = NicoBrowserCookies(opt)
 			if err != nil {
 				return
 			}
-			if notLogin {
-				fmt.Println("not_login")
-				if err = NicoLogin(opt); err != nil {
-					return
-				}
-				continue
-			}
-			if reserved {
-				continue
-			}
+		} else if opt.NicoSession == "" || i > 0 {
+			_, _, opt.NicoSession, _ = options.LoadNicoAccount(opt.NicoLoginAlias)
 		}
 
-		if !opt.NicoHlsOnly {
-			notLogin, e := NicoRecRtmp(opt)
-			if e != nil {
-				err = e
+		var done bool
+		var notLogin bool
+		var reserved bool
+		done, hlsPlaylistEnd, notLogin, reserved, dbName, err = NicoRecHls(opt)
+		if done {
+			return
+		}
+		if err != nil {
+			return
+		}
+		if notLogin {
+			fmt.Println("not_login")
+			if err = NicoLogin(opt); err != nil {
 				return
 			}
-			if notLogin {
-				fmt.Println("not_login")
-				if err = NicoLogin(opt); err != nil {
-					return
-				}
-				continue
-			}
+			continue
+		}
+		if reserved {
+			continue
 		}
 
 		break
@@ -126,10 +227,6 @@ func TestRun(opt options.Option) (err error) {
 		}()
 	}
 
-	opt.NicoRtmpIndex = map[int]bool{
-		0: true,
-	}
-
 	var nextId func() string
 
 	if opt.NicoLiveId == "" {
@@ -139,7 +236,7 @@ func TestRun(opt options.Option) (err error) {
 			opt.NicoTestTimeout = 12
 		}
 
-		resp, e, nete := httpbase.Get("https://live.nicovideo.jp/api/getalertinfo", nil)
+		resp, e, nete := httpbase.Get("https://live.nicovideo.jp/api/getalertinfo", nil, nil)
 		if e != nil {
 			err = e
 			return
